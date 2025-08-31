@@ -18,6 +18,8 @@ define( 'RWSB_STORE_DIR', WP_CONTENT_DIR . '/rwsb-static' );
 define( 'RWSB_STORE_URL', content_url( 'rwsb-static' ) );
 
 require_once RWSB_DIR . 'includes/helpers.php';
+require_once RWSB_DIR . 'includes/class-rwsb-logger.php';
+require_once RWSB_DIR . 'includes/class-rwsb-queue.php';
 require_once RWSB_DIR . 'includes/class-rwsb-builder.php';
 require_once RWSB_DIR . 'includes/class-rwsb-rewrites.php';
 require_once RWSB_DIR . 'includes/class-rwsb-cron.php';
@@ -80,3 +82,4 @@ add_action( 'edited_terms', [ 'RWSB_Builder', 'queue_build_archives' ], 10, 2 );
 add_action( 'rwsb_build_single', [ 'RWSB_Builder', 'build_single' ], 10, 2 );
 add_action( 'rwsb_build_all', [ 'RWSB_Builder', 'build_all' ], 10, 0 );
 add_action( 'rwsb_build_archives', [ 'RWSB_Builder', 'build_archives' ], 10, 0 );
+add_action( 'rwsb_process_queue', [ 'RWSB_Queue', 'process_queue' ], 10, 0 );
