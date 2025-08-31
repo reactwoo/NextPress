@@ -1,0 +1,2 @@
+.rwsb-wrap .form-table th { width: 200px; }
+.rwsb-wrap input[type="text"], .rwsb-wrap input[type="url"], .rwsb-wrap input[type="number"] { max-width: 520px; }
