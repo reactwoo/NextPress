@@ -12,6 +12,7 @@ class RWSB_Admin {
 		add_action( 'admin_post_rwsb_connect_hosting', [ $this, 'handle_connect_hosting' ] );
 		add_action( 'admin_notices', [ $this, 'notices' ] );
 		add_action( 'admin_post_rwsb_test_webhook', [ $this, 'handle_test_webhook' ] );
+		add_action( 'admin_post_rwsb_export_zip', [ $this, 'handle_export_zip' ] );
 	}
 
 	public function menu(): void {
@@ -158,7 +159,11 @@ class RWSB_Admin {
 				<?php wp_nonce_field( 'rwsb_connect_hosting' ); ?>
 				<input type="hidden" name="action" value="rwsb_connect_hosting">
 				<?php if ( ! empty( $opts['hosting_provider'] ) ) : ?>
-					<?php submit_button( 'Connect to ' . ucfirst( $opts['hosting_provider'] ), 'primary', 'submit', false ); ?>
+					<?php if ( (int) $opts['pro_enabled'] === 1 ) : ?>
+						<?php submit_button( 'Connect to ' . ucfirst( $opts['hosting_provider'] ), 'primary', 'submit', false ); ?>
+					<?php else: ?>
+						<?php submit_button( 'Connect (Pro required)', 'secondary', 'submit', false, [ 'disabled' => 'disabled' ] ); ?>
+					<?php endif; ?>
 				<?php else: ?>
 					<?php submit_button( 'Connect to Cloud Hosting', 'secondary', 'submit', false, [ 'disabled' => 'disabled' ] ); ?>
 				<?php endif; ?>
@@ -168,7 +173,11 @@ class RWSB_Admin {
 				<form method="post" action="<?php echo esc_url( admin_url( 'admin-post.php' ) ); ?>" style="margin-top:12px;">
 					<?php wp_nonce_field( 'rwsb_deploy_cloud' ); ?>
 					<input type="hidden" name="action" value="rwsb_deploy_cloud">
-					<?php submit_button( 'Deploy to ' . ucfirst( $opts['hosting_provider'] ), 'primary', 'submit', false ); ?>
+					<?php if ( (int) $opts['pro_enabled'] === 1 ) : ?>
+						<?php submit_button( 'Deploy to ' . ucfirst( $opts['hosting_provider'] ), 'primary', 'submit', false ); ?>
+					<?php else: ?>
+						<?php submit_button( 'Deploy (Pro required)', 'secondary', 'submit', false, [ 'disabled' => 'disabled' ] ); ?>
+					<?php endif; ?>
 				</form>
 			<?php endif; ?>
 
@@ -176,6 +185,12 @@ class RWSB_Admin {
 				<?php wp_nonce_field( 'rwsb_build_all' ); ?>
 				<input type="hidden" name="action" value="rwsb_build_all">
 				<?php submit_button( 'Rebuild Everything Now', 'secondary' ); ?>
+			</form>
+
+			<form method="post" action="<?php echo esc_url( admin_url( 'admin-post.php' ) ); ?>" style="margin-top:12px;">
+				<?php wp_nonce_field( 'rwsb_export_zip' ); ?>
+				<input type="hidden" name="action" value="rwsb_export_zip">
+				<?php submit_button( 'Export Static ZIP', 'secondary' ); ?>
 			</form>
 
 			<p><small>Storage: <code><?php echo esc_html( RWSB_STORE_DIR ); ?></code></small></p>
@@ -193,6 +208,9 @@ class RWSB_Admin {
 		}
 		if ( (int) ( $opts['pro_enabled'] ?? 0 ) === 1 && ! empty( $opts['hosting_provider'] ) && (int) ( $opts['hosting_connected'] ?? 0 ) !== 1 ) {
 			echo '<div class="notice notice-warning"><p>Cloud Hosting provider selected but not connected. Click <em>Connect</em> to authorize.</p></div>';
+		}
+		if ( ! rwsb_is_store_writable() ) {
+			echo '<div class="notice notice-error"><p><strong>Storage not writable:</strong> ' . esc_html( RWSB_STORE_DIR ) . ' — please check permissions.</p></div>';
 		}
 	}
 
@@ -262,6 +280,28 @@ class RWSB_Admin {
 			'body'    => wp_json_encode([ 'event' => 'rwsb.test', 'site' => home_url(), 'installId' => rwsb_get_install_id() ]),
 		] );
 		wp_safe_redirect( admin_url( 'admin.php?page=rwsb&test=sent' ) );
+		exit;
+	}
+
+	public function handle_export_zip(): void {
+		if ( ! current_user_can( 'manage_options' ) ) wp_die( 403 );
+		check_admin_referer( 'rwsb_export_zip' );
+		if ( ! class_exists( 'ZipArchive' ) ) {
+			wp_safe_redirect( admin_url( 'admin.php?page=rwsb&export=zip_unavailable' ) );
+			exit;
+		}
+		$uploads = wp_upload_dir();
+		$tmp = trailingslashit( $uploads['basedir'] ) . 'rwsb-static-' . time() . '.zip';
+		if ( ! rwsb_zip_static_store( $tmp ) ) {
+			wp_safe_redirect( admin_url( 'admin.php?page=rwsb&export=failed' ) );
+			exit;
+		}
+		// Force download
+		header( 'Content-Type: application/zip' );
+		header( 'Content-Disposition: attachment; filename="rwsb-static.zip"' );
+		header( 'Content-Length: ' . filesize( $tmp ) );
+		readfile( $tmp );
+		@unlink( $tmp );
 		exit;
 	}
 }

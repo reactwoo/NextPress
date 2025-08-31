@@ -28,6 +28,13 @@ Next.js-style static rendering for WordPress pages/products with auto rebuilds. 
 3. Once connected, use "Deploy to {Provider}". If you have a provider Build Hook URL, place it in "Deploy Webhook".
 4. For managed tiers, entitlements and quotas are enforced by the license server.
 
+== Pro features ==
+- Toggle "Enable Pro" to unlock external deployments and auto-deploy on build.
+- Auto-deploy triggers after each build when Pro is enabled and a provider is connected.
+
+== Export ==
+- Use "Export Static ZIP" in the Settings page to download `/wp-content/rwsb-static` as a zip for manual hosting/CDN.
+
 == Frequently Asked Questions ==
 = Will this break dynamic pages like carts/checkout? =
 Don’t include those post types/routes. Logged-in users automatically bypass static if enabled.

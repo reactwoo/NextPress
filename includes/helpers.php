@@ -46,11 +46,42 @@ function rwsb_url_for_path( string $url ): string {
 	return $full;
 }
 
+function rwsb_zip_static_store( string $zip_path ): bool {
+	$root = rtrim( RWSB_STORE_DIR, '/' );
+	if ( ! class_exists( 'ZipArchive' ) ) return false;
+	$zip = new ZipArchive();
+	if ( $zip->open( $zip_path, ZipArchive::CREATE | ZipArchive::OVERWRITE ) !== true ) return false;
+	$iterator = new RecursiveIteratorIterator(
+		new RecursiveDirectoryIterator( $root, FilesystemIterator::SKIP_DOTS ),
+		RecursiveIteratorIterator::SELF_FIRST
+	);
+	$root_len = strlen( $root ) + 1;
+	foreach ( $iterator as $file ) {
+		$path = (string) $file;
+		$local = substr( $path, $root_len );
+		if ( is_dir( $path ) ) {
+			$zip->addEmptyDir( $local );
+		} else {
+			$zip->addFile( $path, $local );
+		}
+	}
+	$zip->close();
+	return file_exists( $zip_path );
+}
+
 function rwsb_mkdir_for_file( string $file ): void {
 	$dir = dirname( $file );
 	if ( ! is_dir( $dir ) ) {
 		wp_mkdir_p( $dir );
 	}
+}
+
+function rwsb_is_store_writable(): bool {
+	$dir = RWSB_STORE_DIR;
+	if ( ! file_exists( $dir ) ) {
+		return is_writable( dirname( $dir ) );
+	}
+	return is_writable( $dir );
 }
 
 function rwsb_should_bypass(): bool {
