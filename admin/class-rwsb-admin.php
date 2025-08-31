@@ -8,6 +8,12 @@ class RWSB_Admin {
 		add_action( 'admin_init', [ $this, 'register_settings' ] );
 		add_action( 'admin_enqueue_scripts', [ $this, 'assets' ] );
 		add_action( 'admin_post_rwsb_build_all', [ $this, 'handle_build_all' ] );
+		add_action( 'admin_post_rwsb_clear_queue', [ $this, 'handle_clear_queue' ] );
+		add_action( 'admin_post_rwsb_clear_log', [ $this, 'handle_clear_log' ] );
+		add_action( 'admin_post_rwsb_build_post_type', [ $this, 'handle_build_post_type' ] );
+		add_action( 'admin_post_rwsb_retry_post_type', [ $this, 'handle_retry_post_type' ] );
+		add_action( 'admin_post_rwsb_clear_post_type_failures', [ $this, 'handle_clear_post_type_failures' ] );
+		add_action( 'wp_ajax_rwsb_queue_status', [ $this, 'ajax_queue_status' ] );
 	}
 
 	public function menu(): void {
@@ -40,6 +46,17 @@ class RWSB_Admin {
 			'bypass_param'   => sanitize_key( $input['bypass_param'] ?? 'rwsb' ),
 			'webhook_url'    => esc_url_raw( $input['webhook_url'] ?? '' ),
 			'headers'        => is_array( $input['headers'] ?? [] ) ? array_map( 'sanitize_text_field', $input['headers'] ) : $defaults['headers'],
+			'optimization'   => [
+				'enabled'                => isset( $input['optimization']['enabled'] ) ? 1 : 0,
+				'minify_html'           => isset( $input['optimization']['minify_html'] ) ? 1 : 0,
+				'optimize_css'          => isset( $input['optimization']['optimize_css'] ) ? 1 : 0,
+				'optimize_js'           => isset( $input['optimization']['optimize_js'] ) ? 1 : 0,
+				'remove_unused'         => isset( $input['optimization']['remove_unused'] ) ? 1 : 0,
+				'remove_unused_css'     => isset( $input['optimization']['remove_unused_css'] ) ? 1 : 0,
+				'preserve_late_loading' => isset( $input['optimization']['preserve_late_loading'] ) ? 1 : 0,
+				'add_performance_hints' => isset( $input['optimization']['add_performance_hints'] ) ? 1 : 0,
+				'second_pass_analysis'  => isset( $input['optimization']['second_pass_analysis'] ) ? 1 : 0,
+			],
 		];
 		return wp_parse_args( $clean, $defaults );
 	}
@@ -53,9 +70,75 @@ class RWSB_Admin {
 		if ( ! current_user_can( 'manage_options' ) ) return;
 		$opts = rwsb_get_settings();
 		$post_types = get_post_types( [ 'public' => true ], 'objects' );
+		$queue_status = RWSB_Queue::get_status();
+		$conflicts = RWSB_Optimizer::check_plugin_conflicts();
 		?>
 		<div class="wrap rwsb-wrap">
 			<h1>ReactWoo Static Builder</h1>
+
+			<?php if ( ! empty( $conflicts ) ): ?>
+				<div class="notice notice-warning">
+					<h3>⚠️ Plugin Conflicts Detected</h3>
+					<p>The following optimization plugins may conflict with ReactWoo Static Builder:</p>
+					<ul>
+						<?php foreach ( $conflicts as $conflict ): ?>
+							<li><strong><?php echo esc_html( $conflict['name'] ); ?></strong> (<?php echo esc_html( $conflict['version'] ); ?>)</li>
+						<?php endforeach; ?>
+					</ul>
+					<p><strong>Recommendation:</strong> Disable these plugins or exclude static pages from their optimization to prevent conflicts.</p>
+				</div>
+			<?php endif; ?>
+			
+			<?php if ( isset( $_GET['built'] ) ): ?>
+				<div class="notice notice-success is-dismissible">
+					<p>Static files rebuilt successfully!</p>
+				</div>
+			<?php endif; ?>
+
+			<?php if ( isset( $_GET['queued'] ) ): ?>
+				<div class="notice notice-success is-dismissible">
+					<p>Full rebuild queued successfully! Check status below.</p>
+				</div>
+			<?php endif; ?>
+
+			<?php if ( isset( $_GET['cleared'] ) ): ?>
+				<div class="notice notice-success is-dismissible">
+					<p>Build queue cleared successfully!</p>
+				</div>
+			<?php endif; ?>
+
+			<?php if ( isset( $_GET['log_cleared'] ) ): ?>
+				<div class="notice notice-success is-dismissible">
+					<p>Build log cleared successfully!</p>
+				</div>
+			<?php endif; ?>
+
+			<?php if ( isset( $_GET['post_type_queued'] ) ): ?>
+				<div class="notice notice-success is-dismissible">
+					<p>All <strong><?php echo esc_html( $_GET['post_type_queued'] ); ?></strong> items queued for rebuild!</p>
+				</div>
+			<?php endif; ?>
+
+			<?php if ( isset( $_GET['retried'] ) && isset( $_GET['post_type'] ) ): ?>
+				<div class="notice notice-success is-dismissible">
+					<p>Retried <strong><?php echo (int) $_GET['retried']; ?></strong> failed <strong><?php echo esc_html( $_GET['post_type'] ); ?></strong> builds!</p>
+				</div>
+			<?php endif; ?>
+
+			<?php if ( isset( $_GET['cleared_failures'] ) && isset( $_GET['post_type'] ) ): ?>
+				<div class="notice notice-success is-dismissible">
+					<p>Cleared <strong><?php echo (int) $_GET['cleared_failures']; ?></strong> failed <strong><?php echo esc_html( $_GET['post_type'] ); ?></strong> builds!</p>
+				</div>
+			<?php endif; ?>
+
+			<?php $this->render_queue_status( $queue_status ); ?>
+			
+			<?php $this->render_post_type_overview(); ?>
+			
+			<?php $this->render_recommendations(); ?>
+			
+			<?php $this->render_build_log(); ?>
+			
 			<form method="post" action="options.php">
 				<?php settings_fields( 'rwsb' ); ?>
 				<table class="form-table" role="presentation">
@@ -107,18 +190,189 @@ class RWSB_Admin {
 						</td>
 					</tr>
 				</table>
+
+				<h2>Asset Optimization</h2>
+				<table class="form-table" role="presentation">
+					<tr>
+						<th scope="row">Enable Optimization</th>
+						<td>
+							<label>
+								<input type="checkbox" name="rwsb_settings[optimization][enabled]" value="1" 
+									<?php checked( 1, (int) ($opts['optimization']['enabled'] ?? 0) ); ?>>
+								Enable asset optimization during builds
+							</label>
+							<p class="description">⚠️ Only enable if no other optimization plugins are active to prevent conflicts.</p>
+						</td>
+					</tr>
+					<tr>
+						<th scope="row">HTML Minification</th>
+						<td>
+							<label>
+								<input type="checkbox" name="rwsb_settings[optimization][minify_html]" value="1" 
+									<?php checked( 1, (int) ($opts['optimization']['minify_html'] ?? 0) ); ?>>
+								Minify HTML output (removes unnecessary whitespace)
+							</label>
+						</td>
+					</tr>
+					<tr>
+						<th scope="row">CSS Optimization</th>
+						<td>
+							<label>
+								<input type="checkbox" name="rwsb_settings[optimization][optimize_css]" value="1" 
+									<?php checked( 1, (int) ($opts['optimization']['optimize_css'] ?? 0) ); ?>>
+								Combine and minify CSS files
+							</label><br>
+							<label>
+								<input type="checkbox" name="rwsb_settings[optimization][remove_unused_css]" value="1" 
+									<?php checked( 1, (int) ($opts['optimization']['remove_unused_css'] ?? 0) ); ?>>
+								Remove unused CSS (experimental)
+							</label>
+						</td>
+					</tr>
+					<tr>
+						<th scope="row">JavaScript Optimization</th>
+						<td>
+							<label>
+								<input type="checkbox" name="rwsb_settings[optimization][optimize_js]" value="1" 
+									<?php checked( 1, (int) ($opts['optimization']['optimize_js'] ?? 0) ); ?>>
+								Combine and minify JavaScript
+							</label><br>
+							<label>
+								<input type="checkbox" name="rwsb_settings[optimization][preserve_late_loading]" value="1" 
+									<?php checked( 1, (int) ($opts['optimization']['preserve_late_loading'] ?? 1) ); ?>>
+								Preserve late-loading/event-based JavaScript (recommended)
+							</label>
+						</td>
+					</tr>
+					<tr>
+						<th scope="row">Advanced Options</th>
+						<td>
+							<label>
+								<input type="checkbox" name="rwsb_settings[optimization][remove_unused]" value="1" 
+									<?php checked( 1, (int) ($opts['optimization']['remove_unused'] ?? 0) ); ?>>
+								Remove unused assets (emoji, embeds if not detected)
+							</label><br>
+							<label>
+								<input type="checkbox" name="rwsb_settings[optimization][add_performance_hints]" value="1" 
+									<?php checked( 1, (int) ($opts['optimization']['add_performance_hints'] ?? 1) ); ?>>
+								Add performance hints (preload, dns-prefetch)
+							</label><br>
+							<label>
+								<input type="checkbox" name="rwsb_settings[optimization][second_pass_analysis]" value="1" 
+									<?php checked( 1, (int) ($opts['optimization']['second_pass_analysis'] ?? 1) ); ?>>
+								Enable second-pass analysis for late-loading content
+							</label>
+						</td>
+					</tr>
+				</table>
 				<?php submit_button(); ?>
 			</form>
 
 			<hr>
 
-			<form method="post" action="<?php echo esc_url( admin_url( 'admin-post.php' ) ); ?>">
-				<?php wp_nonce_field( 'rwsb_build_all' ); ?>
-				<input type="hidden" name="action" value="rwsb_build_all">
-				<?php submit_button( 'Rebuild Everything Now', 'secondary' ); ?>
-			</form>
+			<div class="rwsb-action-buttons">
+				<form method="post" action="<?php echo esc_url( admin_url( 'admin-post.php' ) ); ?>" style="display: inline-block;">
+					<?php wp_nonce_field( 'rwsb_build_all' ); ?>
+					<input type="hidden" name="action" value="rwsb_build_all">
+					<?php submit_button( 'Queue Full Rebuild', 'secondary', 'submit', false ); ?>
+				</form>
+
+				<form method="post" action="<?php echo esc_url( admin_url( 'admin-post.php' ) ); ?>" style="display: inline-block;">
+					<?php wp_nonce_field( 'rwsb_clear_queue' ); ?>
+					<input type="hidden" name="action" value="rwsb_clear_queue">
+					<?php submit_button( 'Clear Queue', 'delete', 'submit', false ); ?>
+				</form>
+			</div>
 
 			<p><small>Storage: <code><?php echo esc_html( RWSB_STORE_DIR ); ?></code></small></p>
+		</div>
+		<?php
+	}
+
+	/**
+	 * Render queue status section.
+	 */
+	protected function render_queue_status( array $status ): void {
+		?>
+		<div class="rwsb-queue-status">
+			<h2>Build Queue Status</h2>
+			<div id="rwsb-status-content">
+				<?php $this->render_status_content( $status ); ?>
+			</div>
+			<button type="button" id="rwsb-refresh-status" class="button button-small">Refresh Status</button>
+		</div>
+
+		<script>
+		jQuery(document).ready(function($) {
+			$('#rwsb-refresh-status').on('click', function() {
+				var $btn = $(this);
+				$btn.prop('disabled', true).text('Refreshing...');
+				
+				$.post(ajaxurl, {
+					action: 'rwsb_queue_status',
+					_ajax_nonce: '<?php echo wp_create_nonce( 'rwsb_queue_status' ); ?>'
+				}).done(function(response) {
+					if (response.success) {
+						$('#rwsb-status-content').html(response.data.html);
+					}
+				}).always(function() {
+					$btn.prop('disabled', false).text('Refresh Status');
+				});
+			});
+			
+			// Auto-refresh every 10 seconds if queue is not empty
+			<?php if ( $status['total'] > 0 ): ?>
+			setInterval(function() {
+				$('#rwsb-refresh-status').click();
+			}, 10000);
+			<?php endif; ?>
+		});
+		</script>
+		<?php
+	}
+
+	/**
+	 * Render status content (used for both initial render and AJAX refresh).
+	 */
+	protected function render_status_content( array $status ): void {
+		?>
+		<div class="rwsb-status-grid">
+			<div class="rwsb-status-item">
+				<strong>Total Tasks:</strong><br>
+				<span style="color: <?php echo $status['total'] > 0 ? '#d63638' : '#00a32a'; ?>; font-size: 18px; font-weight: bold;">
+					<?php echo $status['total']; ?>
+				</span>
+			</div>
+			<div class="rwsb-status-item">
+				<strong>Status:</strong><br>
+				<span style="color: <?php echo $status['processing'] ? '#d63638' : '#00a32a'; ?>; font-size: 18px; font-weight: bold;">
+					<?php echo $status['processing'] ? 'Processing' : 'Idle'; ?>
+				</span>
+			</div>
+			<div class="rwsb-status-item">
+				<strong>Single Builds:</strong><br>
+				<span style="font-size: 18px; font-weight: bold;"><?php echo $status['counts']['single']; ?></span>
+			</div>
+			<div class="rwsb-status-item">
+				<strong>Archive Builds:</strong><br>
+				<span style="font-size: 18px; font-weight: bold;"><?php echo $status['counts']['archives']; ?></span>
+			</div>
+			<div class="rwsb-status-item">
+				<strong>Full Rebuilds:</strong><br>
+				<span style="font-size: 18px; font-weight: bold;"><?php echo $status['counts']['full']; ?></span>
+			</div>
+			<div class="rwsb-status-item">
+				<strong>Next Scheduled:</strong><br>
+				<span style="font-size: 14px;">
+				<?php 
+				if ( $status['next_scheduled'] ) {
+					echo human_time_diff( $status['next_scheduled'] ) . ' from now';
+				} else {
+					echo 'None';
+				}
+				?>
+				</span>
+			</div>
 		</div>
 		<?php
 	}
@@ -126,8 +380,307 @@ class RWSB_Admin {
 	public function handle_build_all(): void {
 		if ( ! current_user_can( 'manage_options' ) ) wp_die( 403 );
 		check_admin_referer( 'rwsb_build_all' );
-		RWSB_Builder::build_all();
-		wp_safe_redirect( admin_url( 'admin.php?page=rwsb&built=1' ) );
+		RWSB_Queue::add_full_rebuild( 1 ); // High priority
+		wp_safe_redirect( admin_url( 'admin.php?page=rwsb&queued=1' ) );
+		exit;
+	}
+
+	public function handle_clear_queue(): void {
+		if ( ! current_user_can( 'manage_options' ) ) wp_die( 403 );
+		check_admin_referer( 'rwsb_clear_queue' );
+		RWSB_Queue::clear_queue();
+		wp_safe_redirect( admin_url( 'admin.php?page=rwsb&cleared=1' ) );
+		exit;
+	}
+
+	public function ajax_queue_status(): void {
+		check_ajax_referer( 'rwsb_queue_status' );
+		if ( ! current_user_can( 'manage_options' ) ) {
+			wp_die( 'Unauthorized' );
+		}
+
+		$status = RWSB_Queue::get_status();
+		ob_start();
+		$this->render_status_content( $status );
+		$html = ob_get_clean();
+
+		wp_send_json_success( [ 'html' => $html, 'status' => $status ] );
+	}
+
+	/**
+	 * Render post-type overview section.
+	 */
+	protected function render_post_type_overview(): void {
+		$post_type_stats = RWSB_Logger::get_post_type_overview();
+		$queue_status = RWSB_Queue::get_status();
+		$settings = rwsb_get_settings();
+		$post_types = get_post_types( [ 'public' => true ], 'objects' );
+		
+		?>
+		<div class="rwsb-queue-status">
+			<h2>Post Type Status</h2>
+			
+			<div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 20px;">
+				<?php foreach ( $settings['post_types'] as $post_type ): ?>
+					<?php 
+					$post_type_obj = $post_types[$post_type] ?? null;
+					$stats = $post_type_stats[$post_type] ?? [];
+					$queued = $queue_status['post_type_counts'][$post_type] ?? 0;
+					$failed = count( $queue_status['failed_tasks'][$post_type] ?? [] );
+					$retry = count( $queue_status['retry_tasks'][$post_type] ?? [] );
+					$health = RWSB_Analytics::get_health_score( $post_type );
+					?>
+					<div class="rwsb-post-type-card" style="background: white; border: 1px solid #ddd; border-radius: 6px; padding: 15px;">
+						<h3 style="margin-top: 0; display: flex; align-items: center; gap: 10px;">
+							<?php if ( $post_type_obj ): ?>
+								<span class="dashicons <?php echo esc_attr( $post_type_obj->menu_icon ?: 'dashicons-admin-post' ); ?>"></span>
+								<?php echo esc_html( $post_type_obj->labels->name ); ?>
+							<?php else: ?>
+								<?php echo esc_html( ucfirst( $post_type ) ); ?>
+							<?php endif; ?>
+							
+							<span class="rwsb-health-badge rwsb-grade-<?php echo strtolower( $health['grade'] ); ?>" 
+								  style="padding: 2px 6px; border-radius: 10px; font-size: 11px; font-weight: bold;">
+								<?php echo $health['grade']; ?> (<?php echo $health['score']; ?>)
+							</span>
+							
+							<?php if ( $failed > 0 ): ?>
+								<span class="rwsb-failure-badge" style="background: #d63638; color: white; padding: 2px 6px; border-radius: 10px; font-size: 11px;">
+									<?php echo $failed; ?> failed
+								</span>
+							<?php endif; ?>
+						</h3>
+						
+						<div class="rwsb-post-type-stats" style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 15px;">
+							<div>
+								<strong>Queued:</strong> 
+								<span style="color: <?php echo $queued > 0 ? '#d63638' : '#666'; ?>"><?php echo $queued; ?></span>
+							</div>
+							<div>
+								<strong>Failed:</strong> 
+								<span style="color: <?php echo $failed > 0 ? '#d63638' : '#00a32a'; ?>"><?php echo $failed; ?></span>
+							</div>
+							<div>
+								<strong>Total Builds:</strong> <?php echo $stats['total_builds'] ?? 0; ?>
+							</div>
+							<div>
+								<strong>Success Rate:</strong> 
+								<?php 
+								$total = $stats['total_builds'] ?? 0;
+								$successful = $stats['successful_builds'] ?? 0;
+								$rate = $total > 0 ? round( ( $successful / $total ) * 100, 1 ) : 0;
+								echo $rate . '%';
+								?>
+							</div>
+						</div>
+						
+						<?php if ( ! empty( $stats['last_error'] ) ): ?>
+							<div style="background: #ffebee; padding: 8px; border-radius: 3px; margin-bottom: 10px; font-size: 12px;">
+								<strong>Last Error:</strong> <?php echo esc_html( $stats['last_error']['message'] ?? 'Unknown error' ); ?>
+								<br><small><?php echo human_time_diff( $stats['last_error']['timestamp'] ?? 0 ) . ' ago'; ?></small>
+							</div>
+						<?php endif; ?>
+						
+						<div class="rwsb-post-type-actions" style="display: flex; gap: 8px; flex-wrap: wrap;">
+							<form method="post" action="<?php echo esc_url( admin_url( 'admin-post.php' ) ); ?>" style="display: inline-block;">
+								<?php wp_nonce_field( 'rwsb_build_post_type' ); ?>
+								<input type="hidden" name="action" value="rwsb_build_post_type">
+								<input type="hidden" name="post_type" value="<?php echo esc_attr( $post_type ); ?>">
+								<button type="submit" class="button button-small">Rebuild All</button>
+							</form>
+							
+							<?php if ( $failed > 0 ): ?>
+								<form method="post" action="<?php echo esc_url( admin_url( 'admin-post.php' ) ); ?>" style="display: inline-block;">
+									<?php wp_nonce_field( 'rwsb_retry_post_type' ); ?>
+									<input type="hidden" name="action" value="rwsb_retry_post_type">
+									<input type="hidden" name="post_type" value="<?php echo esc_attr( $post_type ); ?>">
+									<button type="submit" class="button button-small" style="background: #ff9800; border-color: #ff9800; color: white;">Retry Failed</button>
+								</form>
+								
+								<form method="post" action="<?php echo esc_url( admin_url( 'admin-post.php' ) ); ?>" style="display: inline-block;">
+									<?php wp_nonce_field( 'rwsb_clear_post_type_failures' ); ?>
+									<input type="hidden" name="action" value="rwsb_clear_post_type_failures">
+									<input type="hidden" name="post_type" value="<?php echo esc_attr( $post_type ); ?>">
+									<button type="submit" class="button button-small button-link-delete">Clear Failed</button>
+								</form>
+							<?php endif; ?>
+						</div>
+					</div>
+				<?php endforeach; ?>
+			</div>
+		</div>
+		<?php
+	}
+
+	/**
+	 * Render recommendations section.
+	 */
+	protected function render_recommendations(): void {
+		$recommendations = RWSB_Analytics::get_recommendations();
+		
+		if ( empty( $recommendations ) ) {
+			return; // No recommendations to show
+		}
+		
+		?>
+		<div class="rwsb-queue-status">
+			<h2>🎯 Smart Recommendations</h2>
+			
+			<?php foreach ( $recommendations as $post_type => $post_type_recommendations ): ?>
+				<?php $post_type_obj = get_post_type_object( $post_type ); ?>
+				<div style="margin-bottom: 20px; padding: 15px; background: white; border-radius: 6px; border: 1px solid #ddd;">
+					<h3 style="margin-top: 0; margin-bottom: 10px; display: flex; align-items: center; gap: 10px;">
+						<span class="dashicons <?php echo esc_attr( $post_type_obj->menu_icon ?? 'dashicons-admin-post' ); ?>"></span>
+						<?php echo esc_html( $post_type_obj->labels->name ?? ucfirst( $post_type ) ); ?>
+					</h3>
+					
+					<?php foreach ( $post_type_recommendations as $rec ): ?>
+						<div class="notice notice-<?php echo $rec['type'] === 'error' ? 'error' : 'warning'; ?> inline" style="margin: 5px 0; padding: 8px 12px;">
+							<p style="margin: 0;">
+								<strong><?php echo esc_html( $rec['message'] ); ?></strong><br>
+								<em style="color: #666;">💡 Action: <?php echo esc_html( $rec['action'] ); ?></em>
+							</p>
+						</div>
+					<?php endforeach; ?>
+				</div>
+			<?php endforeach; ?>
+		</div>
+		<?php
+	}
+
+	/**
+	 * Render build log section.
+	 */
+	protected function render_build_log(): void {
+		$stats = RWSB_Logger::get_stats();
+		$recent = RWSB_Logger::get_recent_entries( 5 );
+		?>
+		<div class="rwsb-queue-status">
+			<h2>Build History & Statistics</h2>
+			
+			<div class="rwsb-status-grid">
+				<div class="rwsb-status-item">
+					<strong>Total Builds:</strong><br>
+					<span style="font-size: 18px; font-weight: bold;"><?php echo $stats['total_builds']; ?></span>
+				</div>
+				<div class="rwsb-status-item">
+					<strong>Successful:</strong><br>
+					<span style="color: #00a32a; font-size: 18px; font-weight: bold;"><?php echo $stats['successful_builds']; ?></span>
+				</div>
+				<div class="rwsb-status-item">
+					<strong>Failed:</strong><br>
+					<span style="color: #d63638; font-size: 18px; font-weight: bold;"><?php echo $stats['failed_builds']; ?></span>
+				</div>
+				<div class="rwsb-status-item">
+					<strong>Last Build:</strong><br>
+					<span style="font-size: 14px;">
+					<?php 
+					if ( $stats['last_build'] ) {
+						echo human_time_diff( $stats['last_build']['timestamp'] ) . ' ago';
+					} else {
+						echo 'None';
+					}
+					?>
+					</span>
+				</div>
+			</div>
+
+			<?php if ( ! empty( $recent ) ): ?>
+			<h3>Recent Activity</h3>
+			<table class="widefat striped">
+				<thead>
+					<tr>
+						<th>Time</th>
+						<th>Type</th>
+						<th>URL</th>
+						<th>Status</th>
+						<th>Message</th>
+					</tr>
+				</thead>
+				<tbody>
+					<?php foreach ( $recent as $entry ): ?>
+					<tr>
+						<td><?php echo human_time_diff( $entry['timestamp'] ) . ' ago'; ?></td>
+						<td>
+							<span class="rwsb-build-type rwsb-type-<?php echo esc_attr( $entry['type'] ); ?>">
+								<?php echo esc_html( ucfirst( $entry['type'] ) ); ?>
+							</span>
+						</td>
+						<td>
+							<a href="<?php echo esc_url( $entry['url'] ); ?>" target="_blank" title="<?php echo esc_attr( $entry['url'] ); ?>">
+								<?php echo esc_html( wp_parse_url( $entry['url'], PHP_URL_PATH ) ?: '/' ); ?>
+							</a>
+						</td>
+						<td>
+							<span class="rwsb-status rwsb-status-<?php echo esc_attr( $entry['status'] ); ?>">
+								<?php echo esc_html( ucfirst( $entry['status'] ) ); ?>
+							</span>
+						</td>
+						<td><?php echo esc_html( $entry['message'] ); ?></td>
+					</tr>
+					<?php endforeach; ?>
+				</tbody>
+			</table>
+			<?php endif; ?>
+
+			<div class="rwsb-action-buttons" style="margin-top: 15px;">
+				<form method="post" action="<?php echo esc_url( admin_url( 'admin-post.php' ) ); ?>" style="display: inline-block;">
+					<?php wp_nonce_field( 'rwsb_clear_log' ); ?>
+					<input type="hidden" name="action" value="rwsb_clear_log">
+					<?php submit_button( 'Clear Log', 'delete small', 'submit', false ); ?>
+				</form>
+			</div>
+		</div>
+		<?php
+	}
+
+	public function handle_clear_log(): void {
+		if ( ! current_user_can( 'manage_options' ) ) wp_die( 403 );
+		check_admin_referer( 'rwsb_clear_log' );
+		RWSB_Logger::clear_log();
+		wp_safe_redirect( admin_url( 'admin.php?page=rwsb&log_cleared=1' ) );
+		exit;
+	}
+
+	public function handle_build_post_type(): void {
+		if ( ! current_user_can( 'manage_options' ) ) wp_die( 403 );
+		check_admin_referer( 'rwsb_build_post_type' );
+		
+		$post_type = sanitize_key( $_POST['post_type'] ?? '' );
+		if ( empty( $post_type ) ) {
+			wp_die( 'Invalid post type' );
+		}
+		
+		RWSB_Queue::add_post_type( $post_type, 5 ); // High priority
+		wp_safe_redirect( admin_url( 'admin.php?page=rwsb&post_type_queued=' . $post_type ) );
+		exit;
+	}
+
+	public function handle_retry_post_type(): void {
+		if ( ! current_user_can( 'manage_options' ) ) wp_die( 403 );
+		check_admin_referer( 'rwsb_retry_post_type' );
+		
+		$post_type = sanitize_key( $_POST['post_type'] ?? '' );
+		if ( empty( $post_type ) ) {
+			wp_die( 'Invalid post type' );
+		}
+		
+		$retried = RWSB_Queue::retry_post_type_failures( $post_type );
+		wp_safe_redirect( admin_url( 'admin.php?page=rwsb&retried=' . $retried . '&post_type=' . $post_type ) );
+		exit;
+	}
+
+	public function handle_clear_post_type_failures(): void {
+		if ( ! current_user_can( 'manage_options' ) ) wp_die( 403 );
+		check_admin_referer( 'rwsb_clear_post_type_failures' );
+		
+		$post_type = sanitize_key( $_POST['post_type'] ?? '' );
+		if ( empty( $post_type ) ) {
+			wp_die( 'Invalid post type' );
+		}
+		
+		$cleared = RWSB_Queue::clear_post_type_failures( $post_type );
+		wp_safe_redirect( admin_url( 'admin.php?page=rwsb&cleared_failures=' . $cleared . '&post_type=' . $post_type ) );
 		exit;
 	}
 }
