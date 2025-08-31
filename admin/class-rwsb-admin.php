@@ -10,6 +10,8 @@ class RWSB_Admin {
 		add_action( 'admin_post_rwsb_build_all', [ $this, 'handle_build_all' ] );
 		add_action( 'admin_post_rwsb_deploy_cloud', [ $this, 'handle_deploy_cloud' ] );
 		add_action( 'admin_post_rwsb_connect_hosting', [ $this, 'handle_connect_hosting' ] );
+		add_action( 'admin_notices', [ $this, 'notices' ] );
+		add_action( 'admin_post_rwsb_test_webhook', [ $this, 'handle_test_webhook' ] );
 	}
 
 	public function menu(): void {
@@ -44,6 +46,8 @@ class RWSB_Admin {
 			'hosting_provider'   => sanitize_key( $input['hosting_provider'] ?? '' ),
 			'hosting_connected'  => (int) ( $input['hosting_connected'] ?? 0 ),
 			'hosting_manage_url' => esc_url_raw( $input['hosting_manage_url'] ?? '' ),
+			'pro_enabled'        => isset( $input['pro_enabled'] ) ? 1 : 0,
+			'auto_deploy_on_build'=> isset( $input['auto_deploy_on_build'] ) ? 1 : 0,
 			'headers'        => is_array( $input['headers'] ?? [] ) ? array_map( 'sanitize_text_field', $input['headers'] ) : $defaults['headers'],
 		];
 		return wp_parse_args( $clean, $defaults );
@@ -101,6 +105,17 @@ class RWSB_Admin {
 						<td><input style="width:480px" name="rwsb_settings[webhook_url]" type="url" value="<?php echo esc_attr( $opts['webhook_url'] ); ?>"> <small>Optional Netlify/Vercel build hook</small></td>
 					</tr>
 					<tr>
+						<th scope="row">Pro Features</th>
+						<td>
+							<label><input type="checkbox" name="rwsb_settings[pro_enabled]" value="1" <?php checked( 1, (int) $opts['pro_enabled'] ); ?>> Enable Pro (license required)</label>
+							<br>
+							<label><input type="checkbox" name="rwsb_settings[auto_deploy_on_build]" value="1" <?php checked( 1, (int) $opts['auto_deploy_on_build'] ); ?> <?php disabled( (int) $opts['pro_enabled'], 0 ); ?>> Auto-deploy to Cloud after builds</label>
+							<?php if ( (int) $opts['pro_enabled'] === 0 ) : ?>
+								<p><small>Upgrade to Pro to use external deployments and auto-deploy.</small></p>
+							<?php endif; ?>
+						</td>
+					</tr>
+					<tr>
 						<th scope="row">Cloud Hosting</th>
 						<td>
 							<select name="rwsb_settings[hosting_provider]">
@@ -134,6 +149,12 @@ class RWSB_Admin {
 			<hr>
 
 			<form method="post" action="<?php echo esc_url( admin_url( 'admin-post.php' ) ); ?>" style="margin-top:12px;">
+				<?php wp_nonce_field( 'rwsb_test_webhook' ); ?>
+				<input type="hidden" name="action" value="rwsb_test_webhook">
+				<?php submit_button( 'Send Test Webhook', 'secondary', 'submit', false ); ?>
+			</form>
+
+			<form method="post" action="<?php echo esc_url( admin_url( 'admin-post.php' ) ); ?>" style="margin-top:12px;">
 				<?php wp_nonce_field( 'rwsb_connect_hosting' ); ?>
 				<input type="hidden" name="action" value="rwsb_connect_hosting">
 				<?php if ( ! empty( $opts['hosting_provider'] ) ) : ?>
@@ -160,6 +181,19 @@ class RWSB_Admin {
 			<p><small>Storage: <code><?php echo esc_html( RWSB_STORE_DIR ); ?></code></small></p>
 		</div>
 		<?php
+	}
+
+	public function notices(): void {
+		if ( ! current_user_can( 'manage_options' ) ) return;
+		$screen = function_exists( 'get_current_screen' ) ? get_current_screen() : null;
+		if ( ! $screen || $screen->id !== 'toplevel_page_rwsb' ) return;
+		$opts = rwsb_get_settings();
+		if ( (int) ( $opts['pro_enabled'] ?? 0 ) === 0 ) {
+			echo '<div class="notice notice-info"><p><strong>Pro features</strong> are disabled. Enable Pro to use external deployments and auto-deploy.</p></div>';
+		}
+		if ( (int) ( $opts['pro_enabled'] ?? 0 ) === 1 && ! empty( $opts['hosting_provider'] ) && (int) ( $opts['hosting_connected'] ?? 0 ) !== 1 ) {
+			echo '<div class="notice notice-warning"><p>Cloud Hosting provider selected but not connected. Click <em>Connect</em> to authorize.</p></div>';
+		}
 	}
 
 	public function handle_connect_hosting(): void {
@@ -210,6 +244,24 @@ class RWSB_Admin {
 		}
 		$deploy_url = 'https://server.reactwoo.com/api/v1/hosting/deploy?provider=' . rawurlencode( $provider ) . '&site=' . rawurlencode( home_url() ) . '&installId=' . rawurlencode( rwsb_get_install_id() );
 		wp_safe_redirect( $deploy_url );
+		exit;
+	}
+
+	public function handle_test_webhook(): void {
+		if ( ! current_user_can( 'manage_options' ) ) wp_die( 403 );
+		check_admin_referer( 'rwsb_test_webhook' );
+		$opts = rwsb_get_settings();
+		$hook = trim( (string) $opts['webhook_url'] );
+		if ( $hook === '' ) {
+			wp_safe_redirect( admin_url( 'admin.php?page=rwsb&test=missing_webhook' ) );
+			exit;
+		}
+		wp_remote_post( $hook, [
+			'timeout' => 8,
+			'headers' => [ 'Content-Type' => 'application/json' ],
+			'body'    => wp_json_encode([ 'event' => 'rwsb.test', 'site' => home_url(), 'installId' => rwsb_get_install_id() ]),
+		] );
+		wp_safe_redirect( admin_url( 'admin.php?page=rwsb&test=sent' ) );
 		exit;
 	}
 }

@@ -15,6 +15,8 @@ function rwsb_get_settings(): array {
 		'hosting_provider'   => '', // '', 'cloudflare', 'vercel', 'netlify'
 		'hosting_connected'  => 0,
 		'hosting_manage_url' => '',
+		'pro_enabled'        => 0,
+		'auto_deploy_on_build'=> 0,
 		'headers'        => [
 			'Cache-Control' => 'public, max-age=31536000, stale-while-revalidate=30',
 			'X-Powered-By'  => 'ReactWoo Static Builder'
