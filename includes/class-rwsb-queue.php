@@ -12,23 +12,44 @@ class RWSB_Queue {
 	const LOCK_TIMEOUT = 300; // 5 minutes
 
 	/**
-	 * Add a single build task to the queue.
+	 * Add a single build task to the queue with post-type categorization.
 	 */
 	public static function add_single( int $post_id, string $url, int $priority = 10 ): void {
 		$queue = self::get_queue();
-		$task_key = 'single_' . $post_id;
+		$post_type = get_post_type( $post_id ) ?: 'unknown';
+		$task_key = $post_type . '_' . $post_id;
+		
+		// Determine priority based on post type
+		$priority = self::get_post_type_priority( $post_type, $priority );
 		
 		// Update or add task (deduplication by key)
 		$queue[$task_key] = [
 			'type' => 'single',
 			'post_id' => $post_id,
+			'post_type' => $post_type,
 			'url' => $url,
 			'priority' => $priority,
 			'added' => time(),
+			'attempts' => 0,
+			'last_error' => null,
 		];
 		
 		self::save_queue( $queue );
 		self::maybe_schedule_processor();
+	}
+
+	/**
+	 * Get priority based on post type.
+	 */
+	protected static function get_post_type_priority( string $post_type, int $default_priority = 10 ): int {
+		$priorities = [
+			'product' => 1,      // Highest priority - e-commerce critical
+			'page' => 5,         // High priority - main content
+			'post' => 10,        // Medium priority - blog content
+			'attachment' => 15,  // Lower priority - media
+		];
+		
+		return $priorities[$post_type] ?? $default_priority;
 	}
 
 	/**
@@ -88,11 +109,22 @@ class RWSB_Queue {
 			});
 
 			$processed = 0;
-			$batch = array_slice( $queue, 0, self::MAX_BATCH_SIZE, true );
+			$available_tasks = [];
+			
+			// Filter out tasks that are waiting for retry
+			foreach ( $queue as $task_key => $task ) {
+				if ( empty( $task['retry_after'] ) || $task['retry_after'] <= time() ) {
+					$available_tasks[$task_key] = $task;
+				}
+			}
+			
+			$batch = array_slice( $available_tasks, 0, self::MAX_BATCH_SIZE, true );
 			
 			foreach ( $batch as $task_key => $task ) {
-				self::process_task( $task );
-				unset( $queue[$task_key] );
+				$success = self::process_task( $task );
+				if ( $success ) {
+					unset( $queue[$task_key] ); // Remove successful tasks
+				}
 				$processed++;
 			}
 
@@ -111,29 +143,80 @@ class RWSB_Queue {
 	}
 
 	/**
-	 * Process a single task.
+	 * Process a single task with failure handling and retries.
 	 */
-	protected static function process_task( array $task ): void {
+	protected static function process_task( array $task ): bool {
+		$task['attempts'] = ( $task['attempts'] ?? 0 ) + 1;
+		$max_attempts = 3;
+		
 		try {
 			switch ( $task['type'] ) {
 				case 'single':
-					RWSB_Builder::build_single( $task['post_id'], $task['url'] );
+					$success = RWSB_Builder::build_single_with_result( $task['post_id'], $task['url'] );
 					break;
 				case 'archives':
-					RWSB_Builder::build_archives();
+					$success = RWSB_Builder::build_archives_with_result();
 					break;
 				case 'full':
-					RWSB_Builder::build_all();
+					$success = RWSB_Builder::build_all_with_result();
 					break;
+				default:
+					$success = false;
 			}
+			
+			if ( $success ) {
+				// Log success with post type info
+				$post_type = $task['post_type'] ?? 'unknown';
+				RWSB_Logger::log_post_type_build( $post_type, $task['url'] ?? home_url(), 'success', 'Build completed', [
+					'post_id' => $task['post_id'] ?? 0,
+					'attempts' => $task['attempts'],
+					'task_type' => $task['type']
+				] );
+				return true;
+			} else {
+				throw new Exception( 'Build method returned false' );
+			}
+			
 		} catch ( Exception $e ) {
 			$url = $task['url'] ?? home_url();
-			RWSB_Logger::log( $task['type'], $url, 'error', 'Queue processing failed: ' . $e->getMessage(), [
+			$post_type = $task['post_type'] ?? 'unknown';
+			$error_msg = 'Queue processing failed: ' . $e->getMessage();
+			
+			// Log failure with post type info
+			RWSB_Logger::log_post_type_build( $post_type, $url, 'error', $error_msg, [
 				'task' => $task,
+				'attempts' => $task['attempts'],
+				'max_attempts' => $max_attempts,
 				'exception' => $e->getTraceAsString()
 			] );
-			error_log( '[RWSB Queue] Task failed: ' . $e->getMessage() );
+			
+			error_log( '[RWSB Queue] Task failed (attempt ' . $task['attempts'] . '/' . $max_attempts . '): ' . $e->getMessage() );
+			
+			// Retry if under max attempts
+			if ( $task['attempts'] < $max_attempts ) {
+				$task['last_error'] = $error_msg;
+				self::requeue_task( $task );
+			}
+			
+			return false;
 		}
+	}
+
+	/**
+	 * Requeue a failed task with exponential backoff.
+	 */
+	protected static function requeue_task( array $task ): void {
+		$queue = self::get_queue();
+		$task_key = ( $task['post_type'] ?? 'unknown' ) . '_' . ( $task['post_id'] ?? 0 );
+		
+		// Exponential backoff: 30s, 2min, 5min
+		$delays = [ 30, 120, 300 ];
+		$delay = $delays[ min( $task['attempts'] - 1, count( $delays ) - 1 ) ];
+		
+		$task['retry_after'] = time() + $delay;
+		$queue[$task_key] = $task;
+		
+		self::save_queue( $queue );
 	}
 
 	/**
@@ -189,7 +272,7 @@ class RWSB_Queue {
 	}
 
 	/**
-	 * Get queue status for admin display.
+	 * Get queue status for admin display with post-type breakdowns.
 	 */
 	public static function get_status(): array {
 		$queue = self::get_queue();
@@ -201,9 +284,28 @@ class RWSB_Queue {
 			'full' => 0,
 		];
 		
-		foreach ( $queue as $task ) {
+		$post_type_counts = [];
+		$failed_tasks = [];
+		$retry_tasks = [];
+		
+		foreach ( $queue as $task_key => $task ) {
 			if ( isset( $counts[$task['type']] ) ) {
 				$counts[$task['type']]++;
+			}
+			
+			// Count by post type
+			if ( $task['type'] === 'single' ) {
+				$post_type = $task['post_type'] ?? 'unknown';
+				$post_type_counts[$post_type] = ( $post_type_counts[$post_type] ?? 0 ) + 1;
+				
+				// Track failed and retry tasks
+				if ( ! empty( $task['last_error'] ) ) {
+					$failed_tasks[$post_type][] = $task;
+				}
+				
+				if ( ! empty( $task['retry_after'] ) && $task['retry_after'] > time() ) {
+					$retry_tasks[$post_type][] = $task;
+				}
 			}
 		}
 		
@@ -211,8 +313,88 @@ class RWSB_Queue {
 			'total' => count( $queue ),
 			'processing' => $processing,
 			'counts' => $counts,
+			'post_type_counts' => $post_type_counts,
+			'failed_tasks' => $failed_tasks,
+			'retry_tasks' => $retry_tasks,
 			'next_scheduled' => wp_next_scheduled( 'rwsb_process_queue' ),
 		];
+	}
+
+	/**
+	 * Add specific post type to queue.
+	 */
+	public static function add_post_type( string $post_type, int $priority = 10 ): void {
+		$query = new WP_Query([
+			'post_type' => $post_type,
+			'post_status' => 'publish',
+			'posts_per_page' => -1,
+			'fields' => 'ids',
+			'no_found_rows' => true,
+		]);
+
+		if ( $query->posts ) {
+			foreach ( $query->posts as $post_id ) {
+				$url = get_permalink( $post_id );
+				if ( $url ) {
+					self::add_single( (int) $post_id, $url, $priority );
+				}
+			}
+		}
+	}
+
+	/**
+	 * Retry failed tasks for a specific post type.
+	 */
+	public static function retry_post_type_failures( string $post_type ): int {
+		$queue = self::get_queue();
+		$retried = 0;
+		
+		foreach ( $queue as $task_key => $task ) {
+			if ( $task['type'] === 'single' && 
+				 ( $task['post_type'] ?? '' ) === $post_type && 
+				 ! empty( $task['last_error'] ) ) {
+				
+				// Reset attempts and error
+				$task['attempts'] = 0;
+				$task['last_error'] = null;
+				$task['retry_after'] = null;
+				$task['priority'] = self::get_post_type_priority( $post_type, 1 ); // High priority retry
+				
+				$queue[$task_key] = $task;
+				$retried++;
+			}
+		}
+		
+		if ( $retried > 0 ) {
+			self::save_queue( $queue );
+			self::maybe_schedule_processor();
+		}
+		
+		return $retried;
+	}
+
+	/**
+	 * Clear failed tasks for a specific post type.
+	 */
+	public static function clear_post_type_failures( string $post_type ): int {
+		$queue = self::get_queue();
+		$cleared = 0;
+		
+		foreach ( $queue as $task_key => $task ) {
+			if ( $task['type'] === 'single' && 
+				 ( $task['post_type'] ?? '' ) === $post_type && 
+				 ! empty( $task['last_error'] ) ) {
+				
+				unset( $queue[$task_key] );
+				$cleared++;
+			}
+		}
+		
+		if ( $cleared > 0 ) {
+			self::save_queue( $queue );
+		}
+		
+		return $cleared;
 	}
 
 	/**

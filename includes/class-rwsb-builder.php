@@ -99,6 +99,60 @@ class RWSB_Builder {
 		self::maybe_ping_webhook( $url );
 	}
 
+	/**
+	 * Build single with result status for queue processing.
+	 */
+	public static function build_single_with_result( int $post_id, string $url ): bool {
+		$settings = rwsb_get_settings();
+		if ( (int) $settings['enabled'] !== 1 ) return false;
+
+		// Use enhanced renderer for better asset detection and late-loading support
+		$result = RWSB_Renderer::render_page( $url, $post_id );
+		if ( $result['code'] !== 200 || empty( $result['body'] ) ) {
+			return false;
+		}
+
+		$file = rwsb_store_path_for_url( $url );
+		rwsb_mkdir_for_file( $file );
+
+		// Inject marker and canonical (optimization already handled by renderer)
+		$html = self::inject_build_meta( $result['body'], $url );
+
+		$bytes_written = file_put_contents( $file, $html );
+		if ( $bytes_written === false ) {
+			return false;
+		}
+
+		self::maybe_ping_webhook( $url );
+		return true;
+	}
+
+	/**
+	 * Build all with result status.
+	 */
+	public static function build_all_with_result(): bool {
+		try {
+			self::build_all();
+			return true;
+		} catch ( Exception $e ) {
+			error_log( '[RWSB] Build all failed: ' . $e->getMessage() );
+			return false;
+		}
+	}
+
+	/**
+	 * Build archives with result status.
+	 */
+	public static function build_archives_with_result(): bool {
+		try {
+			self::build_archives();
+			return true;
+		} catch ( Exception $e ) {
+			error_log( '[RWSB] Build archives failed: ' . $e->getMessage() );
+			return false;
+		}
+	}
+
 	public static function build_all(): void {
 		$start_time = time();
 		RWSB_Logger::log( 'full', home_url(), 'started', 'Full rebuild started' );

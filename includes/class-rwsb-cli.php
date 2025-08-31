@@ -109,6 +109,98 @@ class RWSB_CLI {
 		RWSB_Queue::process_queue();
 		\WP_CLI::success( 'Queue processing completed.' );
 	}
+
+	/**
+	 * Build all items of a specific post type.
+	 *
+	 * ## OPTIONS
+	 * <post_type>
+	 * : The post type to rebuild (e.g., page, post, product).
+	 *
+	 * [--queue]
+	 * : Add to build queue instead of building immediately.
+	 *
+	 * ## EXAMPLES
+	 *     wp rwsb build-post-type product
+	 *     wp rwsb build-post-type page --queue
+	 */
+	public function build_post_type( $args, $assoc_args ) {
+		if ( empty( $args[0] ) ) {
+			\WP_CLI::error( 'Please specify a post type.' );
+		}
+		
+		$post_type = sanitize_key( $args[0] );
+		$post_type_obj = get_post_type_object( $post_type );
+		
+		if ( ! $post_type_obj ) {
+			\WP_CLI::error( "Post type '{$post_type}' does not exist." );
+		}
+		
+		if ( isset( $assoc_args['queue'] ) ) {
+			RWSB_Queue::add_post_type( $post_type, 5 );
+			\WP_CLI::success( "All {$post_type_obj->labels->name} queued for rebuild." );
+			return;
+		}
+		
+		\WP_CLI::line( "Building all {$post_type_obj->labels->name}..." );
+		
+		$query = new WP_Query([
+			'post_type' => $post_type,
+			'post_status' => 'publish',
+			'posts_per_page' => -1,
+			'fields' => 'ids',
+			'no_found_rows' => true,
+		]);
+
+		$built = 0;
+		$failed = 0;
+		
+		if ( $query->posts ) {
+			$progress = \WP_CLI\Utils\make_progress_bar( 'Building', count( $query->posts ) );
+			
+			foreach ( $query->posts as $post_id ) {
+				$url = get_permalink( $post_id );
+				if ( $url ) {
+					$success = RWSB_Builder::build_single_with_result( (int) $post_id, $url );
+					if ( $success ) {
+						$built++;
+					} else {
+						$failed++;
+					}
+				}
+				$progress->tick();
+			}
+			
+			$progress->finish();
+		}
+		
+		\WP_CLI::success( "Built {$built} {$post_type_obj->labels->name}" . ( $failed > 0 ? " ({$failed} failed)" : '' ) );
+	}
+
+	/**
+	 * Retry failed builds for a specific post type.
+	 *
+	 * ## OPTIONS
+	 * <post_type>
+	 * : The post type to retry failures for.
+	 *
+	 * ## EXAMPLES
+	 *     wp rwsb retry-failures product
+	 */
+	public function retry_failures( $args, $assoc_args ) {
+		if ( empty( $args[0] ) ) {
+			\WP_CLI::error( 'Please specify a post type.' );
+		}
+		
+		$post_type = sanitize_key( $args[0] );
+		$retried = RWSB_Queue::retry_post_type_failures( $post_type );
+		
+		if ( $retried > 0 ) {
+			\WP_CLI::success( "Retried {$retried} failed {$post_type} builds." );
+		} else {
+			\WP_CLI::line( "No failed {$post_type} builds to retry." );
+		}
+	}
 }
 
 if ( class_exists( 'WP_CLI' ) ) {

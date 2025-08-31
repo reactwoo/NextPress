@@ -80,3 +80,85 @@
 	background: #fff8e1;
 	color: #f57f17;
 }
+
+/* Post type cards */
+.rwsb-post-type-card {
+	background: white;
+	border: 1px solid #ddd;
+	border-radius: 6px;
+	padding: 15px;
+	transition: box-shadow 0.2s ease;
+}
+
+.rwsb-post-type-card:hover {
+	box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+}
+
+.rwsb-post-type-card h3 {
+	margin-top: 0;
+	display: flex;
+	align-items: center;
+	gap: 10px;
+}
+
+.rwsb-failure-badge {
+	background: #d63638;
+	color: white;
+	padding: 2px 6px;
+	border-radius: 10px;
+	font-size: 11px;
+	font-weight: bold;
+}
+
+.rwsb-post-type-stats {
+	display: grid;
+	grid-template-columns: 1fr 1fr;
+	gap: 10px;
+	margin-bottom: 15px;
+	font-size: 13px;
+}
+
+.rwsb-post-type-actions {
+	display: flex;
+	gap: 8px;
+	flex-wrap: wrap;
+}
+
+.rwsb-post-type-actions .button {
+	font-size: 11px;
+	height: auto;
+	padding: 4px 8px;
+}
+
+/* Health grade badges */
+.rwsb-health-badge {
+	padding: 2px 6px;
+	border-radius: 10px;
+	font-size: 11px;
+	font-weight: bold;
+}
+
+.rwsb-grade-a {
+	background: #00a32a;
+	color: white;
+}
+
+.rwsb-grade-b {
+	background: #00a32a;
+	color: white;
+}
+
+.rwsb-grade-c {
+	background: #ff9800;
+	color: white;
+}
+
+.rwsb-grade-d {
+	background: #ff5722;
+	color: white;
+}
+
+.rwsb-grade-f {
+	background: #d63638;
+	color: white;
+}

@@ -10,6 +10,9 @@ class RWSB_Admin {
 		add_action( 'admin_post_rwsb_build_all', [ $this, 'handle_build_all' ] );
 		add_action( 'admin_post_rwsb_clear_queue', [ $this, 'handle_clear_queue' ] );
 		add_action( 'admin_post_rwsb_clear_log', [ $this, 'handle_clear_log' ] );
+		add_action( 'admin_post_rwsb_build_post_type', [ $this, 'handle_build_post_type' ] );
+		add_action( 'admin_post_rwsb_retry_post_type', [ $this, 'handle_retry_post_type' ] );
+		add_action( 'admin_post_rwsb_clear_post_type_failures', [ $this, 'handle_clear_post_type_failures' ] );
 		add_action( 'wp_ajax_rwsb_queue_status', [ $this, 'ajax_queue_status' ] );
 	}
 
@@ -110,7 +113,29 @@ class RWSB_Admin {
 				</div>
 			<?php endif; ?>
 
+			<?php if ( isset( $_GET['post_type_queued'] ) ): ?>
+				<div class="notice notice-success is-dismissible">
+					<p>All <strong><?php echo esc_html( $_GET['post_type_queued'] ); ?></strong> items queued for rebuild!</p>
+				</div>
+			<?php endif; ?>
+
+			<?php if ( isset( $_GET['retried'] ) && isset( $_GET['post_type'] ) ): ?>
+				<div class="notice notice-success is-dismissible">
+					<p>Retried <strong><?php echo (int) $_GET['retried']; ?></strong> failed <strong><?php echo esc_html( $_GET['post_type'] ); ?></strong> builds!</p>
+				</div>
+			<?php endif; ?>
+
+			<?php if ( isset( $_GET['cleared_failures'] ) && isset( $_GET['post_type'] ) ): ?>
+				<div class="notice notice-success is-dismissible">
+					<p>Cleared <strong><?php echo (int) $_GET['cleared_failures']; ?></strong> failed <strong><?php echo esc_html( $_GET['post_type'] ); ?></strong> builds!</p>
+				</div>
+			<?php endif; ?>
+
 			<?php $this->render_queue_status( $queue_status ); ?>
+			
+			<?php $this->render_post_type_overview(); ?>
+			
+			<?php $this->render_recommendations(); ?>
 			
 			<?php $this->render_build_log(); ?>
 			
@@ -383,6 +408,147 @@ class RWSB_Admin {
 	}
 
 	/**
+	 * Render post-type overview section.
+	 */
+	protected function render_post_type_overview(): void {
+		$post_type_stats = RWSB_Logger::get_post_type_overview();
+		$queue_status = RWSB_Queue::get_status();
+		$settings = rwsb_get_settings();
+		$post_types = get_post_types( [ 'public' => true ], 'objects' );
+		
+		?>
+		<div class="rwsb-queue-status">
+			<h2>Post Type Status</h2>
+			
+			<div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 20px;">
+				<?php foreach ( $settings['post_types'] as $post_type ): ?>
+					<?php 
+					$post_type_obj = $post_types[$post_type] ?? null;
+					$stats = $post_type_stats[$post_type] ?? [];
+					$queued = $queue_status['post_type_counts'][$post_type] ?? 0;
+					$failed = count( $queue_status['failed_tasks'][$post_type] ?? [] );
+					$retry = count( $queue_status['retry_tasks'][$post_type] ?? [] );
+					$health = RWSB_Analytics::get_health_score( $post_type );
+					?>
+					<div class="rwsb-post-type-card" style="background: white; border: 1px solid #ddd; border-radius: 6px; padding: 15px;">
+						<h3 style="margin-top: 0; display: flex; align-items: center; gap: 10px;">
+							<?php if ( $post_type_obj ): ?>
+								<span class="dashicons <?php echo esc_attr( $post_type_obj->menu_icon ?: 'dashicons-admin-post' ); ?>"></span>
+								<?php echo esc_html( $post_type_obj->labels->name ); ?>
+							<?php else: ?>
+								<?php echo esc_html( ucfirst( $post_type ) ); ?>
+							<?php endif; ?>
+							
+							<span class="rwsb-health-badge rwsb-grade-<?php echo strtolower( $health['grade'] ); ?>" 
+								  style="padding: 2px 6px; border-radius: 10px; font-size: 11px; font-weight: bold;">
+								<?php echo $health['grade']; ?> (<?php echo $health['score']; ?>)
+							</span>
+							
+							<?php if ( $failed > 0 ): ?>
+								<span class="rwsb-failure-badge" style="background: #d63638; color: white; padding: 2px 6px; border-radius: 10px; font-size: 11px;">
+									<?php echo $failed; ?> failed
+								</span>
+							<?php endif; ?>
+						</h3>
+						
+						<div class="rwsb-post-type-stats" style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 15px;">
+							<div>
+								<strong>Queued:</strong> 
+								<span style="color: <?php echo $queued > 0 ? '#d63638' : '#666'; ?>"><?php echo $queued; ?></span>
+							</div>
+							<div>
+								<strong>Failed:</strong> 
+								<span style="color: <?php echo $failed > 0 ? '#d63638' : '#00a32a'; ?>"><?php echo $failed; ?></span>
+							</div>
+							<div>
+								<strong>Total Builds:</strong> <?php echo $stats['total_builds'] ?? 0; ?>
+							</div>
+							<div>
+								<strong>Success Rate:</strong> 
+								<?php 
+								$total = $stats['total_builds'] ?? 0;
+								$successful = $stats['successful_builds'] ?? 0;
+								$rate = $total > 0 ? round( ( $successful / $total ) * 100, 1 ) : 0;
+								echo $rate . '%';
+								?>
+							</div>
+						</div>
+						
+						<?php if ( ! empty( $stats['last_error'] ) ): ?>
+							<div style="background: #ffebee; padding: 8px; border-radius: 3px; margin-bottom: 10px; font-size: 12px;">
+								<strong>Last Error:</strong> <?php echo esc_html( $stats['last_error']['message'] ?? 'Unknown error' ); ?>
+								<br><small><?php echo human_time_diff( $stats['last_error']['timestamp'] ?? 0 ) . ' ago'; ?></small>
+							</div>
+						<?php endif; ?>
+						
+						<div class="rwsb-post-type-actions" style="display: flex; gap: 8px; flex-wrap: wrap;">
+							<form method="post" action="<?php echo esc_url( admin_url( 'admin-post.php' ) ); ?>" style="display: inline-block;">
+								<?php wp_nonce_field( 'rwsb_build_post_type' ); ?>
+								<input type="hidden" name="action" value="rwsb_build_post_type">
+								<input type="hidden" name="post_type" value="<?php echo esc_attr( $post_type ); ?>">
+								<button type="submit" class="button button-small">Rebuild All</button>
+							</form>
+							
+							<?php if ( $failed > 0 ): ?>
+								<form method="post" action="<?php echo esc_url( admin_url( 'admin-post.php' ) ); ?>" style="display: inline-block;">
+									<?php wp_nonce_field( 'rwsb_retry_post_type' ); ?>
+									<input type="hidden" name="action" value="rwsb_retry_post_type">
+									<input type="hidden" name="post_type" value="<?php echo esc_attr( $post_type ); ?>">
+									<button type="submit" class="button button-small" style="background: #ff9800; border-color: #ff9800; color: white;">Retry Failed</button>
+								</form>
+								
+								<form method="post" action="<?php echo esc_url( admin_url( 'admin-post.php' ) ); ?>" style="display: inline-block;">
+									<?php wp_nonce_field( 'rwsb_clear_post_type_failures' ); ?>
+									<input type="hidden" name="action" value="rwsb_clear_post_type_failures">
+									<input type="hidden" name="post_type" value="<?php echo esc_attr( $post_type ); ?>">
+									<button type="submit" class="button button-small button-link-delete">Clear Failed</button>
+								</form>
+							<?php endif; ?>
+						</div>
+					</div>
+				<?php endforeach; ?>
+			</div>
+		</div>
+		<?php
+	}
+
+	/**
+	 * Render recommendations section.
+	 */
+	protected function render_recommendations(): void {
+		$recommendations = RWSB_Analytics::get_recommendations();
+		
+		if ( empty( $recommendations ) ) {
+			return; // No recommendations to show
+		}
+		
+		?>
+		<div class="rwsb-queue-status">
+			<h2>🎯 Smart Recommendations</h2>
+			
+			<?php foreach ( $recommendations as $post_type => $post_type_recommendations ): ?>
+				<?php $post_type_obj = get_post_type_object( $post_type ); ?>
+				<div style="margin-bottom: 20px; padding: 15px; background: white; border-radius: 6px; border: 1px solid #ddd;">
+					<h3 style="margin-top: 0; margin-bottom: 10px; display: flex; align-items: center; gap: 10px;">
+						<span class="dashicons <?php echo esc_attr( $post_type_obj->menu_icon ?? 'dashicons-admin-post' ); ?>"></span>
+						<?php echo esc_html( $post_type_obj->labels->name ?? ucfirst( $post_type ) ); ?>
+					</h3>
+					
+					<?php foreach ( $post_type_recommendations as $rec ): ?>
+						<div class="notice notice-<?php echo $rec['type'] === 'error' ? 'error' : 'warning'; ?> inline" style="margin: 5px 0; padding: 8px 12px;">
+							<p style="margin: 0;">
+								<strong><?php echo esc_html( $rec['message'] ); ?></strong><br>
+								<em style="color: #666;">💡 Action: <?php echo esc_html( $rec['action'] ); ?></em>
+							</p>
+						</div>
+					<?php endforeach; ?>
+				</div>
+			<?php endforeach; ?>
+		</div>
+		<?php
+	}
+
+	/**
 	 * Render build log section.
 	 */
 	protected function render_build_log(): void {
@@ -473,6 +639,48 @@ class RWSB_Admin {
 		check_admin_referer( 'rwsb_clear_log' );
 		RWSB_Logger::clear_log();
 		wp_safe_redirect( admin_url( 'admin.php?page=rwsb&log_cleared=1' ) );
+		exit;
+	}
+
+	public function handle_build_post_type(): void {
+		if ( ! current_user_can( 'manage_options' ) ) wp_die( 403 );
+		check_admin_referer( 'rwsb_build_post_type' );
+		
+		$post_type = sanitize_key( $_POST['post_type'] ?? '' );
+		if ( empty( $post_type ) ) {
+			wp_die( 'Invalid post type' );
+		}
+		
+		RWSB_Queue::add_post_type( $post_type, 5 ); // High priority
+		wp_safe_redirect( admin_url( 'admin.php?page=rwsb&post_type_queued=' . $post_type ) );
+		exit;
+	}
+
+	public function handle_retry_post_type(): void {
+		if ( ! current_user_can( 'manage_options' ) ) wp_die( 403 );
+		check_admin_referer( 'rwsb_retry_post_type' );
+		
+		$post_type = sanitize_key( $_POST['post_type'] ?? '' );
+		if ( empty( $post_type ) ) {
+			wp_die( 'Invalid post type' );
+		}
+		
+		$retried = RWSB_Queue::retry_post_type_failures( $post_type );
+		wp_safe_redirect( admin_url( 'admin.php?page=rwsb&retried=' . $retried . '&post_type=' . $post_type ) );
+		exit;
+	}
+
+	public function handle_clear_post_type_failures(): void {
+		if ( ! current_user_can( 'manage_options' ) ) wp_die( 403 );
+		check_admin_referer( 'rwsb_clear_post_type_failures' );
+		
+		$post_type = sanitize_key( $_POST['post_type'] ?? '' );
+		if ( empty( $post_type ) ) {
+			wp_die( 'Invalid post type' );
+		}
+		
+		$cleared = RWSB_Queue::clear_post_type_failures( $post_type );
+		wp_safe_redirect( admin_url( 'admin.php?page=rwsb&cleared_failures=' . $cleared . '&post_type=' . $post_type ) );
 		exit;
 	}
 }
