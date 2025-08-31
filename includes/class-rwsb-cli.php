@@ -1,4 +1,4 @@
-include<?php
+<?php
 if ( ! defined( 'ABSPATH' ) ) exit;
 
 class RWSB_CLI {
