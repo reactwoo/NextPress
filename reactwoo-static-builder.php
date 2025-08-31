@@ -19,6 +19,8 @@ define( 'RWSB_STORE_URL', content_url( 'rwsb-static' ) );
 
 require_once RWSB_DIR . 'includes/helpers.php';
 require_once RWSB_DIR . 'includes/class-rwsb-logger.php';
+require_once RWSB_DIR . 'includes/class-rwsb-optimizer.php';
+require_once RWSB_DIR . 'includes/class-rwsb-renderer.php';
 require_once RWSB_DIR . 'includes/class-rwsb-queue.php';
 require_once RWSB_DIR . 'includes/class-rwsb-builder.php';
 require_once RWSB_DIR . 'includes/class-rwsb-rewrites.php';

@@ -15,6 +15,17 @@ function rwsb_get_settings(): array {
 			'Cache-Control' => 'public, max-age=31536000, stale-while-revalidate=30',
 			'X-Powered-By'  => 'ReactWoo Static Builder'
 		],
+		'optimization'   => [
+			'enabled'                => 0,
+			'minify_html'           => 0,
+			'optimize_css'          => 0,
+			'optimize_js'           => 0,
+			'remove_unused'         => 0,
+			'remove_unused_css'     => 0,
+			'preserve_late_loading' => 1,
+			'add_performance_hints' => 1,
+			'second_pass_analysis'  => 1,
+		],
 	] );
 }
 

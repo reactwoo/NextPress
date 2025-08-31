@@ -63,24 +63,23 @@ class RWSB_Builder {
 
 		RWSB_Logger::log( 'single', $url, 'started', 'Build started for post ID: ' . $post_id );
 
-		// Fetch fully rendered HTML via HTTP to include theme/plugins output.
-		// Bypass param ensures dynamic mode (not served static while building).
-		$bypass = $settings['bypass_param'] ?: 'rwsb';
-		$sep    = str_contains( $url, '?' ) ? '&' : '?';
-		$build_url = $url . $sep . $bypass . '=miss';
-
-		$result = rwsb_http_get( $build_url );
+		// Use enhanced renderer for better asset detection and late-loading support
+		$result = RWSB_Renderer::render_page( $url, $post_id );
 		if ( $result['code'] !== 200 || empty( $result['body'] ) ) {
 			$error_msg = 'Build failed for ' . $url . ' code=' . $result['code'] . ' error=' . $result['error'];
 			error_log( '[RWSB] ' . $error_msg );
-			RWSB_Logger::log( 'single', $url, 'error', $error_msg, [ 'post_id' => $post_id, 'http_code' => $result['code'] ] );
+			RWSB_Logger::log( 'single', $url, 'error', $error_msg, [ 
+				'post_id' => $post_id, 
+				'http_code' => $result['code'],
+				'metadata' => $result['metadata'] ?? []
+			] );
 			return;
 		}
 
 		$file = rwsb_store_path_for_url( $url );
 		rwsb_mkdir_for_file( $file );
 
-		// Inject marker and canonical.
+		// Inject marker and canonical (optimization already handled by renderer)
 		$html = self::inject_build_meta( $result['body'], $url );
 
 		$bytes_written = file_put_contents( $file, $html );
@@ -91,11 +90,11 @@ class RWSB_Builder {
 			return;
 		}
 
-		RWSB_Logger::log( 'single', $url, 'success', 'Built successfully', [ 
+		RWSB_Logger::log( 'single', $url, 'success', 'Built successfully', array_merge( [
 			'post_id' => $post_id, 
 			'file_size' => $bytes_written,
 			'file_path' => $file 
-		] );
+		], $result['metadata'] ?? [] ) );
 
 		self::maybe_ping_webhook( $url );
 	}
@@ -283,9 +282,17 @@ class RWSB_Builder {
 		$sep      = str_contains( $url, '?' ) ? '&' : '?';
 		$result   = rwsb_http_get( $url . $sep . $bypass . '=miss' );
 		if ( $result['code'] !== 200 || empty( $result['body'] ) ) return;
+		
 		$file = rwsb_store_path_for_url( $url );
 		rwsb_mkdir_for_file( $file );
-		$html = self::inject_build_meta( $result['body'], $url );
+		
+		// Optimize assets if enabled
+		$html = $result['body'];
+		if ( ! empty( $settings['optimization']['enabled'] ) ) {
+			$html = RWSB_Optimizer::optimize_html( $html, $url );
+		}
+		
+		$html = self::inject_build_meta( $html, $url );
 		file_put_contents( $file, $html );
 	}
 

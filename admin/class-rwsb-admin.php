@@ -43,6 +43,17 @@ class RWSB_Admin {
 			'bypass_param'   => sanitize_key( $input['bypass_param'] ?? 'rwsb' ),
 			'webhook_url'    => esc_url_raw( $input['webhook_url'] ?? '' ),
 			'headers'        => is_array( $input['headers'] ?? [] ) ? array_map( 'sanitize_text_field', $input['headers'] ) : $defaults['headers'],
+			'optimization'   => [
+				'enabled'                => isset( $input['optimization']['enabled'] ) ? 1 : 0,
+				'minify_html'           => isset( $input['optimization']['minify_html'] ) ? 1 : 0,
+				'optimize_css'          => isset( $input['optimization']['optimize_css'] ) ? 1 : 0,
+				'optimize_js'           => isset( $input['optimization']['optimize_js'] ) ? 1 : 0,
+				'remove_unused'         => isset( $input['optimization']['remove_unused'] ) ? 1 : 0,
+				'remove_unused_css'     => isset( $input['optimization']['remove_unused_css'] ) ? 1 : 0,
+				'preserve_late_loading' => isset( $input['optimization']['preserve_late_loading'] ) ? 1 : 0,
+				'add_performance_hints' => isset( $input['optimization']['add_performance_hints'] ) ? 1 : 0,
+				'second_pass_analysis'  => isset( $input['optimization']['second_pass_analysis'] ) ? 1 : 0,
+			],
 		];
 		return wp_parse_args( $clean, $defaults );
 	}
@@ -57,9 +68,23 @@ class RWSB_Admin {
 		$opts = rwsb_get_settings();
 		$post_types = get_post_types( [ 'public' => true ], 'objects' );
 		$queue_status = RWSB_Queue::get_status();
+		$conflicts = RWSB_Optimizer::check_plugin_conflicts();
 		?>
 		<div class="wrap rwsb-wrap">
 			<h1>ReactWoo Static Builder</h1>
+
+			<?php if ( ! empty( $conflicts ) ): ?>
+				<div class="notice notice-warning">
+					<h3>⚠️ Plugin Conflicts Detected</h3>
+					<p>The following optimization plugins may conflict with ReactWoo Static Builder:</p>
+					<ul>
+						<?php foreach ( $conflicts as $conflict ): ?>
+							<li><strong><?php echo esc_html( $conflict['name'] ); ?></strong> (<?php echo esc_html( $conflict['version'] ); ?>)</li>
+						<?php endforeach; ?>
+					</ul>
+					<p><strong>Recommendation:</strong> Disable these plugins or exclude static pages from their optimization to prevent conflicts.</p>
+				</div>
+			<?php endif; ?>
 			
 			<?php if ( isset( $_GET['built'] ) ): ?>
 				<div class="notice notice-success is-dismissible">
@@ -136,6 +161,81 @@ class RWSB_Admin {
 							</label><br><br>
 							<label>X-Powered-By<br>
 								<input style="width:480px" name="rwsb_settings[headers][X-Powered-By]" type="text" value="<?php echo esc_attr( $opts['headers']['X-Powered-By'] ?? '' ); ?>">
+							</label>
+						</td>
+					</tr>
+				</table>
+
+				<h2>Asset Optimization</h2>
+				<table class="form-table" role="presentation">
+					<tr>
+						<th scope="row">Enable Optimization</th>
+						<td>
+							<label>
+								<input type="checkbox" name="rwsb_settings[optimization][enabled]" value="1" 
+									<?php checked( 1, (int) ($opts['optimization']['enabled'] ?? 0) ); ?>>
+								Enable asset optimization during builds
+							</label>
+							<p class="description">⚠️ Only enable if no other optimization plugins are active to prevent conflicts.</p>
+						</td>
+					</tr>
+					<tr>
+						<th scope="row">HTML Minification</th>
+						<td>
+							<label>
+								<input type="checkbox" name="rwsb_settings[optimization][minify_html]" value="1" 
+									<?php checked( 1, (int) ($opts['optimization']['minify_html'] ?? 0) ); ?>>
+								Minify HTML output (removes unnecessary whitespace)
+							</label>
+						</td>
+					</tr>
+					<tr>
+						<th scope="row">CSS Optimization</th>
+						<td>
+							<label>
+								<input type="checkbox" name="rwsb_settings[optimization][optimize_css]" value="1" 
+									<?php checked( 1, (int) ($opts['optimization']['optimize_css'] ?? 0) ); ?>>
+								Combine and minify CSS files
+							</label><br>
+							<label>
+								<input type="checkbox" name="rwsb_settings[optimization][remove_unused_css]" value="1" 
+									<?php checked( 1, (int) ($opts['optimization']['remove_unused_css'] ?? 0) ); ?>>
+								Remove unused CSS (experimental)
+							</label>
+						</td>
+					</tr>
+					<tr>
+						<th scope="row">JavaScript Optimization</th>
+						<td>
+							<label>
+								<input type="checkbox" name="rwsb_settings[optimization][optimize_js]" value="1" 
+									<?php checked( 1, (int) ($opts['optimization']['optimize_js'] ?? 0) ); ?>>
+								Combine and minify JavaScript
+							</label><br>
+							<label>
+								<input type="checkbox" name="rwsb_settings[optimization][preserve_late_loading]" value="1" 
+									<?php checked( 1, (int) ($opts['optimization']['preserve_late_loading'] ?? 1) ); ?>>
+								Preserve late-loading/event-based JavaScript (recommended)
+							</label>
+						</td>
+					</tr>
+					<tr>
+						<th scope="row">Advanced Options</th>
+						<td>
+							<label>
+								<input type="checkbox" name="rwsb_settings[optimization][remove_unused]" value="1" 
+									<?php checked( 1, (int) ($opts['optimization']['remove_unused'] ?? 0) ); ?>>
+								Remove unused assets (emoji, embeds if not detected)
+							</label><br>
+							<label>
+								<input type="checkbox" name="rwsb_settings[optimization][add_performance_hints]" value="1" 
+									<?php checked( 1, (int) ($opts['optimization']['add_performance_hints'] ?? 1) ); ?>>
+								Add performance hints (preload, dns-prefetch)
+							</label><br>
+							<label>
+								<input type="checkbox" name="rwsb_settings[optimization][second_pass_analysis]" value="1" 
+									<?php checked( 1, (int) ($opts['optimization']['second_pass_analysis'] ?? 1) ); ?>>
+								Enable second-pass analysis for late-loading content
 							</label>
 						</td>
 					</tr>
