@@ -8,6 +8,7 @@ class RWSB_Admin {
 		add_action( 'admin_init', [ $this, 'register_settings' ] );
 		add_action( 'admin_enqueue_scripts', [ $this, 'assets' ] );
 		add_action( 'admin_post_rwsb_build_all', [ $this, 'handle_build_all' ] );
+		add_action( 'admin_post_rwsb_local_export', [ $this, 'handle_local_export' ] );
 	}
 
 	public function menu(): void {
@@ -151,6 +152,24 @@ class RWSB_Admin {
 			</form>
 
 			<p><small>Storage: <code><?php echo esc_html( RWSB_STORE_DIR ); ?></code></small></p>
+
+			<hr>
+
+			<h2>Local Export (Next.js ZIP)</h2>
+			<form method="post" action="<?php echo esc_url( admin_url( 'admin-post.php' ) ); ?>">
+				<?php wp_nonce_field( 'rwsb_local_export' ); ?>
+				<input type="hidden" name="action" value="rwsb_local_export">
+				<p>Select published pages to include:</p>
+				<div style="max-height:180px;overflow:auto;border:1px solid #e5e5e5;padding:8px;width:480px;">
+					<?php
+						$pages = get_posts([ 'post_type' => 'page', 'post_status' => 'publish', 'posts_per_page' => -1, 'orderby' => 'title', 'order' => 'ASC' ]);
+						foreach ( $pages as $p ) {
+							echo '<label style="display:block;margin:4px 0;"><input type="checkbox" name="rwsb_export_ids[]" value="' . (int) $p->ID . '"> ' . esc_html( get_the_title( $p ) ) . '</label>';
+						}
+					?>
+				</div>
+				<?php submit_button( 'Download Next.js ZIP', 'primary' ); ?>
+			</form>
 		</div>
 		<?php
 	}
@@ -161,6 +180,10 @@ class RWSB_Admin {
 		RWSB_Builder::build_all();
 		wp_safe_redirect( admin_url( 'admin.php?page=rwsb&built=1' ) );
 		exit;
+	}
+
+	public function handle_local_export(): void {
+		RWSB_Exporter::handle_local_export();
 	}
 }
 

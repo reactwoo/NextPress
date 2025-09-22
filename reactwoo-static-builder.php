@@ -28,6 +28,7 @@ if ( defined( 'WP_CLI' ) && WP_CLI ) {
 
 if ( is_admin() ) {
 	require_once RWSB_DIR . 'admin/class-rwsb-admin.php';
+	require_once RWSB_DIR . 'includes/class-rwsb-exporter.php';
 }
 
 register_activation_hook( __FILE__, function() {
