@@ -78,6 +78,11 @@ class RWSB_Builder {
 		file_put_contents( $file, $html );
 
 		self::maybe_ping_webhook( $url );
+
+		// If Pro + auto-deploy enabled, trigger deploy.
+		if ( (int) ( $settings['pro_enabled'] ?? 0 ) === 1 && (int) ( $settings['auto_deploy_on_build'] ?? 0 ) === 1 ) {
+			self::maybe_trigger_cloud_deploy();
+		}
 	}
 
 	public static function build_all(): void {
@@ -163,5 +168,23 @@ class RWSB_Builder {
 			'headers' => [ 'Content-Type' => 'application/json' ],
 			'body'    => wp_json_encode([ 'event' => 'rwsb.build', 'url' => $url, 'site' => home_url() ]),
 		] );
+	}
+
+	protected static function maybe_trigger_cloud_deploy(): void {
+		$settings = rwsb_get_settings();
+		$provider = sanitize_key( $settings['hosting_provider'] ?? '' );
+		if ( $provider === '' || (int) ( $settings['hosting_connected'] ?? 0 ) !== 1 ) return;
+		$hook = trim( (string) $settings['webhook_url'] );
+		if ( $hook !== '' ) {
+			wp_remote_post( $hook, [
+				'timeout' => 8,
+				'headers' => [ 'Content-Type' => 'application/json' ],
+				'body'    => wp_json_encode([ 'event' => 'rwsb.auto_deploy', 'provider' => $provider, 'site' => home_url(), 'installId' => rwsb_get_install_id() ]),
+			] );
+			return;
+		}
+		// Fallback: redirectable endpoint (no-op in background)
+		$deploy_url = 'https://server.reactwoo.com/api/v1/hosting/deploy?provider=' . rawurlencode( $provider ) . '&site=' . rawurlencode( home_url() ) . '&installId=' . rawurlencode( rwsb_get_install_id() );
+		wp_remote_get( $deploy_url, [ 'timeout' => 5 ] );
 	}
 }
