@@ -42,7 +42,10 @@ register_activation_hook( __FILE__, function() {
 		'serve_static'   => 1,
 		'respect_logged' => 1,
 		'bypass_param'   => 'rwsb',
+		'provider'       => 'cloudflare', // cloudflare|netlify|vercel|none
 		'webhook_url'    => '',
+		'webhook_mode'   => 'debounced', // off|per_build|debounced
+		'deploy_debounce_sec' => 60,
 		'headers'        => [
 			'Cache-Control' => 'public, max-age=31536000, stale-while-revalidate=30',
 			'X-Powered-By'  => 'ReactWoo Static Builder'
@@ -80,3 +83,6 @@ add_action( 'edited_terms', [ 'RWSB_Builder', 'queue_build_archives' ], 10, 2 );
 add_action( 'rwsb_build_single', [ 'RWSB_Builder', 'build_single' ], 10, 2 );
 add_action( 'rwsb_build_all', [ 'RWSB_Builder', 'build_all' ], 10, 0 );
 add_action( 'rwsb_build_archives', [ 'RWSB_Builder', 'build_archives' ], 10, 0 );
+
+// Debounced webhook sender.
+add_action( 'rwsb_send_webhook', [ 'RWSB_Builder', 'send_debounced_webhook' ], 10, 0 );
