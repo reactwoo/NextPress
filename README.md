@@ -26,6 +26,12 @@ Next.js-style static rendering for WordPress pages/products with auto rebuilds.
   - `app/[slug]/page.tsx` that renders Elementor trees or falls back to `page.content`
 - After unzipping, run `npm install && npm run dev` in the exported folder.
 
+== Cloud Export ==
+- Configure in WP Admin → Static Builder:
+  - Cloud API URL (e.g. `https://api.reactwoo.com`)
+  - License Token (JWT from `license.reactwoo.com`)
+- Use Cloud Export to send selected pages to the cloud API and receive an Export ID. The API validates the token against the existing license server and triggers a provider build (Vercel/Netlify).
+
 == Installation ==
 1. Upload the plugin folder to /wp-content/plugins/
 2. Activate in WP Admin → Plugins

@@ -9,6 +9,7 @@ class RWSB_Admin {
 		add_action( 'admin_enqueue_scripts', [ $this, 'assets' ] );
 		add_action( 'admin_post_rwsb_build_all', [ $this, 'handle_build_all' ] );
 		add_action( 'admin_post_rwsb_local_export', [ $this, 'handle_local_export' ] );
+		add_action( 'admin_post_rwsb_cloud_export', [ $this, 'handle_cloud_export' ] );
 	}
 
 	public function menu(): void {
@@ -40,6 +41,8 @@ class RWSB_Admin {
 			'ttl'            => max( 0, (int) ( $input['ttl'] ?? 0 ) ),
 			'bypass_param'   => sanitize_key( $input['bypass_param'] ?? 'rwsb' ),
 			'provider'       => in_array( ($input['provider'] ?? 'cloudflare'), ['cloudflare','netlify','vercel','none'], true ) ? $input['provider'] : 'cloudflare',
+			'cloud_api_url'  => esc_url_raw( $input['cloud_api_url'] ?? '' ),
+			'license_token'  => sanitize_text_field( $input['license_token'] ?? '' ),
 			'webhook_url'    => esc_url_raw( $input['webhook_url'] ?? '' ),
 			'webhook_mode'   => in_array( ($input['webhook_mode'] ?? 'debounced'), ['off','per_build','debounced'], true ) ? $input['webhook_mode'] : 'debounced',
 			'deploy_debounce_sec' => max( 0, (int) ( $input['deploy_debounce_sec'] ?? 60 ) ),
@@ -73,6 +76,18 @@ class RWSB_Admin {
 								<option value="none" <?php selected( $opts['provider'], 'none' ); ?>>None / Custom</option>
 							</select>
 							<p class="description">Choose the deployment target for external builds. Cloudflare is the most cost-efficient default.</p>
+						</td>
+					</tr>
+					<tr>
+						<th scope="row">Cloud API URL</th>
+						<td>
+							<input style="width:480px" name="rwsb_settings[cloud_api_url]" type="url" value="<?php echo esc_attr( $opts['cloud_api_url'] ); ?>"> <small>e.g. https://api.reactwoo.com</small>
+						</td>
+					</tr>
+					<tr>
+						<th scope="row">License Token</th>
+						<td>
+							<input style="width:480px" name="rwsb_settings[license_token]" type="text" value="<?php echo esc_attr( $opts['license_token'] ); ?>"> <small>JWT from license.reactwoo.com</small>
 						</td>
 					</tr>
 					<tr>
@@ -170,6 +185,32 @@ class RWSB_Admin {
 				</div>
 				<?php submit_button( 'Download Next.js ZIP', 'primary' ); ?>
 			</form>
+
+			<hr>
+
+			<h2>Cloud Export</h2>
+			<form method="post" action="<?php echo esc_url( admin_url( 'admin-post.php' ) ); ?>">
+				<?php wp_nonce_field( 'rwsb_cloud_export' ); ?>
+				<input type="hidden" name="action" value="rwsb_cloud_export">
+				<p>Select published pages to include:</p>
+				<div style="max-height:180px;overflow:auto;border:1px solid #e5e5e5;padding:8px;width:480px;">
+					<?php
+						$pages = get_posts([ 'post_type' => 'page', 'post_status' => 'publish', 'posts_per_page' => -1, 'orderby' => 'title', 'order' => 'ASC' ]);
+						foreach ( $pages as $p ) {
+							echo '<label style="display:block;margin:4px 0;"><input type="checkbox" name="rwsb_export_ids[]" value="' . (int) $p->ID . '"> ' . esc_html( get_the_title( $p ) ) . '</label>';
+						}
+					?>
+				</div>
+				<p>
+					<label>Build provider:
+						<select name="rwsb_build_provider">
+							<option value="vercel">Vercel</option>
+							<option value="netlify">Netlify</option>
+						</select>
+					</label>
+				</p>
+				<?php submit_button( 'Send to Cloud Export', 'primary' ); ?>
+			</form>
 		</div>
 		<?php
 	}
@@ -184,6 +225,10 @@ class RWSB_Admin {
 
 	public function handle_local_export(): void {
 		RWSB_Exporter::handle_local_export();
+	}
+
+	public function handle_cloud_export(): void {
+		RWSB_Exporter::handle_cloud_export();
 	}
 }
 

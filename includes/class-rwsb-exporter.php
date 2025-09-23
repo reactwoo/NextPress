@@ -21,6 +21,47 @@ class RWSB_Exporter {
 		self::stream_zip_and_cleanup( $zip_path );
 	}
 
+	public static function handle_cloud_export(): void {
+		if ( ! current_user_can( 'manage_options' ) ) wp_die( 403 );
+		check_admin_referer( 'rwsb_cloud_export' );
+		$selected = array_map( 'intval', (array) ($_POST['rwsb_export_ids'] ?? []) );
+		$provider = sanitize_text_field( $_POST['rwsb_build_provider'] ?? 'vercel' );
+		if ( empty( $selected ) ) {
+			wp_safe_redirect( admin_url( 'admin.php?page=rwsb&cloud_error=none_selected' ) );
+			exit;
+		}
+		$settings = rwsb_get_settings();
+		$api = trim( (string) $settings['cloud_api_url'] );
+		$token = trim( (string) $settings['license_token'] );
+		if ( $api === '' || $token === '' ) {
+			wp_safe_redirect( admin_url( 'admin.php?page=rwsb&cloud_error=missing_config' ) );
+			exit;
+		}
+
+		$payload = self::build_export_payload( $selected, [ 'build' => [ 'provider' => $provider, 'mode' => 'ssg' ] ] );
+		$response = wp_remote_post( rtrim( $api, '/' ) . '/v1/exports', [
+			'timeout' => 30,
+			'headers' => [
+				'Content-Type' => 'application/json',
+				'Authorization' => 'Bearer ' . $token,
+				'User-Agent' => 'ReactWooStaticBuilder/' . RWSB_VERSION,
+			],
+			'body' => wp_json_encode( $payload ),
+		] );
+		if ( is_wp_error( $response ) ) {
+			wp_safe_redirect( admin_url( 'admin.php?page=rwsb&cloud_error=' . rawurlencode( $response->get_error_message() ) ) );
+			exit;
+		}
+		$code = wp_remote_retrieve_response_code( $response );
+		$body = json_decode( (string) wp_remote_retrieve_body( $response ), true );
+		if ( $code !== 202 || empty( $body['id'] ) ) {
+			wp_safe_redirect( admin_url( 'admin.php?page=rwsb&cloud_error=bad_response' ) );
+			exit;
+		}
+		wp_safe_redirect( admin_url( 'admin.php?page=rwsb&cloud_export_id=' . urlencode( $body['id'] ) ) );
+		exit;
+	}
+
 	protected static function build_zip_for_posts( array $post_ids ): string {
 		$upload_dir = wp_upload_dir();
 		$work_dir = trailingslashit( $upload_dir['basedir'] ) . 'rwsb-export-' . wp_generate_password( 8, false ) . '/';
@@ -112,6 +153,30 @@ class RWSB_Exporter {
 				self::inject_tailwind_colors( trailingslashit( $work_dir . 'app-root' ) . 'tailwind.config.js', $palette );
 			}
 		}
+	}
+
+	protected static function build_export_payload( array $post_ids, array $extra = [] ): array {
+		$data = [ 'site' => [ 'url' => home_url() ], 'pages' => [], 'globals' => [] ];
+		foreach ( $post_ids as $pid ) {
+			$post = get_post( $pid );
+			if ( ! $post || $post->post_status !== 'publish' ) continue;
+			$elementor_raw = get_post_meta( $pid, '_elementor_data', true );
+			$elementor_json = self::maybe_json_decode( $elementor_raw );
+			$elementor_css  = self::read_elementor_css_for_post( $pid );
+			$data['pages'][] = [
+				'id' => $pid,
+				'slug' => trim( get_post_field( 'post_name', $pid ) ),
+				'title' => get_the_title( $pid ),
+				'content' => apply_filters( 'the_content', $post->post_content ),
+				'elementor_data' => $elementor_json,
+				'elementor_css'  => $elementor_css,
+			];
+		}
+		$global_settings = get_option( 'elementor_global_settings', [] );
+		if ( ! empty( $global_settings ) ) {
+			$data['globals']['elementor_global_settings'] = $global_settings;
+		}
+		return array_merge( $data, $extra );
 	}
 
 	/**

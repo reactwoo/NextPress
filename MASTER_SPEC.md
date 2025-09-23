@@ -297,8 +297,9 @@ Unsupported → `<UnsupportedWidget note="..." />`
 - [x] Generate Next.js repo ZIP
 
 ### Phase 2 (Cloud Export – Pro)
-- [ ] API endpoints: /v1/exports, /v1/licenses/verify
-- [ ] Build runner → Vercel/Netlify API
+- [x] API endpoints: /v1/exports, /v1/exports/:id
+- [x] License validation: trust existing license.reactwoo.com (JWT/JWKS)
+- [x] Build runner stubs → Vercel/Netlify API
 - [ ] Plugin: send payload + show status
 - [ ] Dashboard: login, connect site, build list
 

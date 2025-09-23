@@ -11,6 +11,8 @@ function rwsb_get_settings(): array {
 		'respect_logged' => 1,
 		'bypass_param'   => 'rwsb',
 		'provider'       => 'cloudflare',
+		'cloud_api_url'  => '',
+		'license_token'  => '',
 		'webhook_url'    => '',
 		'webhook_mode'   => 'debounced',
 		'deploy_debounce_sec' => 60,
