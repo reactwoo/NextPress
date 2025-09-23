@@ -17,6 +17,15 @@ Next.js-style static rendering for WordPress pages/products with auto rebuilds.
  - Deployment provider selector (Cloudflare/Netlify/Vercel) with cost guardrails
 - WP-CLI: `wp rwsb build-all` and `wp rwsb build --id=123|--url=...`
 
+== Local Export (Next.js ZIP) ==
+- Tools → Static Builder → Local Export lets you select published pages and download a ready-to-run Next.js project ZIP.
+- The ZIP includes:
+  - `app/exportData.json` with page data and Elementor JSON per page
+  - Minimal renderer for Elementor core widgets (section, column, heading, text, image, button)
+  - Tailwind configured with your Elementor global colors
+  - `app/[slug]/page.tsx` that renders Elementor trees or falls back to `page.content`
+- After unzipping, run `npm install && npm run dev` in the exported folder.
+
 == Installation ==
 1. Upload the plugin folder to /wp-content/plugins/
 2. Activate in WP Admin → Plugins

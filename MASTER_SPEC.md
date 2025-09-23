@@ -291,10 +291,10 @@ Unsupported → `<UnsupportedWidget note="..." />`
 ## 10. Development Roadmap
 
 ### Phase 1 (MVP – Local Exporter)
-- [ ] WP plugin: parse Elementor JSON
-- [ ] Map core widgets (section, column, text, image, button)
-- [ ] Tailwind config generator
-- [ ] Generate Next.js repo ZIP
+- [x] WP plugin: parse Elementor JSON
+- [x] Map core widgets (section, column, text, image, button)
+- [x] Tailwind config generator
+- [x] Generate Next.js repo ZIP
 
 ### Phase 2 (Cloud Export – Pro)
 - [ ] API endpoints: /v1/exports, /v1/licenses/verify

@@ -73,6 +73,13 @@ class RWSB_Exporter {
 		$global_settings = get_option( 'elementor_global_settings', [] );
 		if ( ! empty( $global_settings ) ) {
 			$data['globals']['elementor_global_settings'] = $global_settings;
+			$tw_colors = self::extract_elementor_colors( (array) $global_settings );
+			if ( ! empty( $tw_colors ) ) {
+				$data['globals']['colors'] = [];
+				foreach ( $tw_colors as $k => $v ) {
+					$data['globals']['colors'][] = [ 'name' => $k, 'value' => $v ];
+				}
+			}
 		}
 
 		$export_dir = trailingslashit( $work_dir . 'app-root/app' );
@@ -97,6 +104,81 @@ class RWSB_Exporter {
 			}
 		}
 		file_put_contents( $globals_css_path, $existing . $css );
+
+		// Inject Tailwind color palette if available
+		if ( ! empty( $global_settings ) ) {
+			$palette = self::extract_elementor_colors( (array) $global_settings );
+			if ( ! empty( $palette ) ) {
+				self::inject_tailwind_colors( trailingslashit( $work_dir . 'app-root' ) . 'tailwind.config.js', $palette );
+			}
+		}
+	}
+
+	/**
+	 * Build Tailwind color palette from Elementor global settings structure.
+	 */
+	protected static function extract_elementor_colors( array $globals ): array {
+		$palette = [];
+		$possible_sets = [];
+		if ( isset( $globals['system_colors']['colors'] ) && is_array( $globals['system_colors']['colors'] ) ) {
+			$possible_sets[] = $globals['system_colors']['colors'];
+		}
+		if ( isset( $globals['system_colors'] ) && is_array( $globals['system_colors'] ) ) {
+			$possible_sets[] = $globals['system_colors'];
+		}
+		if ( isset( $globals['theme_colors'] ) && is_array( $globals['theme_colors'] ) ) {
+			$possible_sets[] = $globals['theme_colors'];
+		}
+		if ( isset( $globals['custom_colors'] ) && is_array( $globals['custom_colors'] ) ) {
+			$possible_sets[] = $globals['custom_colors'];
+		}
+
+		foreach ( $possible_sets as $set ) {
+			foreach ( (array) $set as $idx => $item ) {
+				if ( ! is_array( $item ) ) continue;
+				$raw = $item['color'] ?? $item['value'] ?? '';
+				if ( ! is_string( $raw ) || $raw === '' ) continue;
+				$name_raw = $item['title'] ?? $item['name'] ?? $item['_id'] ?? ( 'color_' . (int) $idx );
+				$name = sanitize_title( (string) $name_raw );
+				// Basic validation for color values (#, rgb, hsl)
+				if ( preg_match( '/^(#([0-9a-fA-F]{3}|[0-9a-fA-F]{6}|[0-9a-fA-F]{8})|rgb[a]?\(|hsl[a]?\()/', $raw ) ) ) {
+					$palette[ $name ] = $raw;
+				}
+			}
+		}
+
+		return $palette;
+	}
+
+	/**
+	 * Inject colors into tailwind.config.js under theme.extend.colors
+	 */
+	protected static function inject_tailwind_colors( string $config_path, array $palette ): void {
+		if ( ! file_exists( $config_path ) ) return;
+		$contents = (string) file_get_contents( $config_path );
+
+		$colors_js = [];
+		foreach ( $palette as $k => $v ) {
+			// Ensure valid JS identifiers or quoted keys
+			$key = preg_match( '/^[a-zA-Z_$][a-zA-Z0-9_$]*$/', $k ) ? $k : ( '"' . $k . '"' );
+			$val = '"' . str_replace( '"', '\"', $v ) . '"';
+			$colors_js[] = $key . ': ' . $val;
+		}
+		$colors_block = 'colors: { ' . implode( ', ', $colors_js ) . ' }';
+
+		if ( strpos( $contents, 'extend: {}' ) !== false ) {
+			$contents = str_replace( 'extend: {}', 'extend: { ' . $colors_block . ' }', $contents );
+		} else if ( preg_match( '/extend:\s*\{/', $contents ) ) {
+			$contents = preg_replace( '/extend:\s*\{/', 'extend: { ' . $colors_block . ', ', $contents, 1 );
+		} else if ( preg_match( '/theme:\s*\{/', $contents ) ) {
+			$contents = preg_replace( '/theme:\s*\{/', 'theme: { extend: { ' . $colors_block . ' }, ', $contents, 1 );
+		} else {
+			// Fallback: append a minimal theme.extend block
+			$contents = rtrim( $contents );
+			$contents .= "\n// RWSB injected colors\nmodule.exports.theme = { extend: { " . $colors_block . " } };\n";
+		}
+
+		file_put_contents( $config_path, $contents );
 	}
 
 	protected static function zip_directory( string $src_dir, string $zip_path ): void {

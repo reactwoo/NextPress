@@ -1,4 +1,5 @@
 import data from '../exportData.json';
+import { renderElementorTree } from '../../components/elementor/Renderer';
 
 export default function Page({ params }) {
   const pages = (data as any).pages || [];
@@ -7,7 +8,9 @@ export default function Page({ params }) {
   return (
     <main style={{ padding: 24 }}>
       <h1>{page.title || page.slug}</h1>
-      <div dangerouslySetInnerHTML={{ __html: page.content || '' }} />
+      {page.elementor_data && Array.isArray(page.elementor_data)
+        ? renderElementorTree(page.elementor_data)
+        : <div dangerouslySetInnerHTML={{ __html: page.content || '' }} />}
     </main>
   );
 }
