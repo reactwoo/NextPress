@@ -291,16 +291,33 @@ Unsupported → `<UnsupportedWidget note="..." />`
 ## 10. Development Roadmap
 
 ### Phase 1 (MVP – Local Exporter)
-- [ ] WP plugin: parse Elementor JSON
-- [ ] Map core widgets (section, column, text, image, button)
-- [ ] Tailwind config generator
-- [ ] Generate Next.js repo ZIP
+- [x] WP plugin: parse Elementor JSON
+- [x] Map core widgets (section, column, text, image, button)
+- [x] Tailwind config generator
+- [x] Generate Next.js repo ZIP
 
 ### Phase 2 (Cloud Export – Pro)
-- [ ] API endpoints: /v1/exports, /v1/licenses/verify
-- [ ] Build runner → Vercel/Netlify API
+- [x] API endpoints: /v1/exports, /v1/exports/:id
+- [x] License validation: trust existing license.reactwoo.com (JWT/JWKS)
+- [x] Build runner stubs → Vercel/Netlify API
 - [ ] Plugin: send payload + show status
 - [ ] Dashboard: login, connect site, build list
+
+### Local Cloud Export Test (Developer Checklist)
+1. Run the cloud API locally with license JWKS env vars:
+```bash
+cd cloud-api && npm install
+LICENSE_JWKS_URL="https://license.reactwoo.com/.well-known/jwks.json" \
+LICENSE_AUDIENCE="reactwoo-cloud-api" \
+LICENSE_ISSUER="https://license.reactwoo.com/" \
+PORT=3001 npm run dev
+```
+2. In WP Admin → Static Builder settings:
+   - Set `Cloud API URL` to `http://localhost:3001`
+   - Paste a valid `License Token` (JWT) from `license.reactwoo.com`
+3. Use Cloud Export to send selected pages. Capture returned `export_id`.
+4. Poll `GET /v1/exports/:id` with the same Bearer token to verify `status` and `deploy_url`.
+5. Confirm Elementor JSON is present in payload and minimal mapping renders in Next.js template in local ZIP (Phase 1).
 
 ### Phase 3 (Growth Features)
 - [ ] Query Loop → WPGraphQL

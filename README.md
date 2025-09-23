@@ -17,6 +17,41 @@ Next.js-style static rendering for WordPress pages/products with auto rebuilds.
  - Deployment provider selector (Cloudflare/Netlify/Vercel) with cost guardrails
 - WP-CLI: `wp rwsb build-all` and `wp rwsb build --id=123|--url=...`
 
+== Local Export (Next.js ZIP) ==
+- Tools → Static Builder → Local Export lets you select published pages and download a ready-to-run Next.js project ZIP.
+- The ZIP includes:
+  - `app/exportData.json` with page data and Elementor JSON per page
+  - Minimal renderer for Elementor core widgets (section, column, heading, text, image, button)
+  - Tailwind configured with your Elementor global colors
+  - `app/[slug]/page.tsx` that renders Elementor trees or falls back to `page.content`
+- After unzipping, run `npm install && npm run dev` in the exported folder.
+
+== Cloud Export ==
+- Configure in WP Admin → Static Builder:
+  - Cloud API URL (e.g. `https://api.reactwoo.com`)
+  - License Token (JWT from `license.reactwoo.com`)
+- Use Cloud Export to send selected pages to the cloud API and receive an Export ID. The API validates the token against the existing license server and triggers a provider build (Vercel/Netlify).
+
+== Local Cloud Export Test ==
+1) Start the cloud API locally:
+```bash
+cd cloud-api && npm install
+LICENSE_JWKS_URL="https://license.reactwoo.com/.well-known/jwks.json" \
+LICENSE_AUDIENCE="reactwoo-cloud-api" \
+LICENSE_ISSUER="https://license.reactwoo.com/" \
+PORT=3001 npm run dev
+```
+2) In WP Admin → Static Builder settings, set:
+   - Cloud API URL: `http://localhost:3001`
+   - License Token: paste JWT from `license.reactwoo.com`
+3) Go to Static Builder → Cloud Export, select some pages, submit.
+4) On success you will be redirected with `cloud_export_id=exp_...`.
+5) Verify status:
+```bash
+curl -H "Authorization: Bearer <YOUR_JWT>" http://localhost:3001/v1/exports/<export_id>
+```
+6) Expect a `status` of `running|success|failed`, and `deploy_url` when completed (stub in this phase).
+
 == Installation ==
 1. Upload the plugin folder to /wp-content/plugins/
 2. Activate in WP Admin → Plugins
