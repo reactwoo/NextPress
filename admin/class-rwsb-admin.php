@@ -8,6 +8,7 @@ class RWSB_Admin {
 		add_action( 'admin_init', [ $this, 'register_settings' ] );
 		add_action( 'admin_enqueue_scripts', [ $this, 'assets' ] );
 		add_action( 'admin_post_rwsb_build_all', [ $this, 'handle_build_all' ] );
+		add_action( 'admin_post_rwsb_local_export', [ $this, 'handle_local_export' ] );
 	}
 
 	public function menu(): void {
@@ -38,7 +39,10 @@ class RWSB_Admin {
 			'post_types'     => array_values( array_filter( array_map( 'sanitize_text_field', (array) ($input['post_types'] ?? []) ) ) ),
 			'ttl'            => max( 0, (int) ( $input['ttl'] ?? 0 ) ),
 			'bypass_param'   => sanitize_key( $input['bypass_param'] ?? 'rwsb' ),
+			'provider'       => in_array( ($input['provider'] ?? 'cloudflare'), ['cloudflare','netlify','vercel','none'], true ) ? $input['provider'] : 'cloudflare',
 			'webhook_url'    => esc_url_raw( $input['webhook_url'] ?? '' ),
+			'webhook_mode'   => in_array( ($input['webhook_mode'] ?? 'debounced'), ['off','per_build','debounced'], true ) ? $input['webhook_mode'] : 'debounced',
+			'deploy_debounce_sec' => max( 0, (int) ( $input['deploy_debounce_sec'] ?? 60 ) ),
 			'headers'        => is_array( $input['headers'] ?? [] ) ? array_map( 'sanitize_text_field', $input['headers'] ) : $defaults['headers'],
 		];
 		return wp_parse_args( $clean, $defaults );
@@ -59,6 +63,18 @@ class RWSB_Admin {
 			<form method="post" action="options.php">
 				<?php settings_fields( 'rwsb' ); ?>
 				<table class="form-table" role="presentation">
+					<tr>
+						<th scope="row">Provider</th>
+						<td>
+							<select name="rwsb_settings[provider]">
+								<option value="cloudflare" <?php selected( $opts['provider'], 'cloudflare' ); ?>>Cloudflare Pages (default)</option>
+								<option value="netlify" <?php selected( $opts['provider'], 'netlify' ); ?>>Netlify</option>
+								<option value="vercel" <?php selected( $opts['provider'], 'vercel' ); ?>>Vercel</option>
+								<option value="none" <?php selected( $opts['provider'], 'none' ); ?>>None / Custom</option>
+							</select>
+							<p class="description">Choose the deployment target for external builds. Cloudflare is the most cost-efficient default.</p>
+						</td>
+					</tr>
 					<tr>
 						<th scope="row">Enable</th>
 						<td><label><input type="checkbox" name="rwsb_settings[enabled]" value="1" <?php checked( 1, (int) $opts['enabled'] ); ?>> Turn on static builds</label></td>
@@ -93,7 +109,24 @@ class RWSB_Admin {
 					</tr>
 					<tr>
 						<th scope="row">Deploy Webhook</th>
-						<td><input style="width:480px" name="rwsb_settings[webhook_url]" type="url" value="<?php echo esc_attr( $opts['webhook_url'] ); ?>"> <small>Optional Netlify/Vercel build hook</small></td>
+						<td>
+							<input style="width:480px" name="rwsb_settings[webhook_url]" type="url" value="<?php echo esc_attr( $opts['webhook_url'] ); ?>"> <small>Optional build hook (Netlify/Vercel/Custom)</small>
+							<p style="margin-top:8px">
+								<label>Webhook Mode
+									<select name="rwsb_settings[webhook_mode]">
+										<option value="off" <?php selected( $opts['webhook_mode'], 'off' ); ?>>Off (no pings)</option>
+										<option value="per_build" <?php selected( $opts['webhook_mode'], 'per_build' ); ?>>Per build (immediate)</option>
+										<option value="debounced" <?php selected( $opts['webhook_mode'], 'debounced' ); ?>>Debounced (batch to reduce costs)</option>
+									</select>
+								</label>
+							</p>
+							<p>
+								<label>Debounce Window (seconds)
+									<input name="rwsb_settings[deploy_debounce_sec]" type="number" min="0" step="1" value="<?php echo esc_attr( (int) $opts['deploy_debounce_sec'] ); ?>">
+								</label>
+								<small>Combine multiple content updates into a single webhook to avoid over-triggering builds.</small>
+							</p>
+						</td>
 					</tr>
 					<tr>
 						<th scope="row">Response Headers</th>
@@ -119,6 +152,24 @@ class RWSB_Admin {
 			</form>
 
 			<p><small>Storage: <code><?php echo esc_html( RWSB_STORE_DIR ); ?></code></small></p>
+
+			<hr>
+
+			<h2>Local Export (Next.js ZIP)</h2>
+			<form method="post" action="<?php echo esc_url( admin_url( 'admin-post.php' ) ); ?>">
+				<?php wp_nonce_field( 'rwsb_local_export' ); ?>
+				<input type="hidden" name="action" value="rwsb_local_export">
+				<p>Select published pages to include:</p>
+				<div style="max-height:180px;overflow:auto;border:1px solid #e5e5e5;padding:8px;width:480px;">
+					<?php
+						$pages = get_posts([ 'post_type' => 'page', 'post_status' => 'publish', 'posts_per_page' => -1, 'orderby' => 'title', 'order' => 'ASC' ]);
+						foreach ( $pages as $p ) {
+							echo '<label style="display:block;margin:4px 0;"><input type="checkbox" name="rwsb_export_ids[]" value="' . (int) $p->ID . '"> ' . esc_html( get_the_title( $p ) ) . '</label>';
+						}
+					?>
+				</div>
+				<?php submit_button( 'Download Next.js ZIP', 'primary' ); ?>
+			</form>
 		</div>
 		<?php
 	}
@@ -129,6 +180,10 @@ class RWSB_Admin {
 		RWSB_Builder::build_all();
 		wp_safe_redirect( admin_url( 'admin.php?page=rwsb&built=1' ) );
 		exit;
+	}
+
+	public function handle_local_export(): void {
+		RWSB_Exporter::handle_local_export();
 	}
 }
 

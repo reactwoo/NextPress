@@ -157,11 +157,31 @@ class RWSB_Builder {
 	protected static function maybe_ping_webhook( string $url ): void {
 		$settings = rwsb_get_settings();
 		$hook = trim( (string) $settings['webhook_url'] );
+		$mode = (string) ( $settings['webhook_mode'] ?? 'debounced' );
+		$debounce = (int) ( $settings['deploy_debounce_sec'] ?? 60 );
+		if ( $hook === '' || $mode === 'off' ) return;
+		if ( $mode === 'per_build' ) {
+			wp_remote_post( $hook, [
+				'timeout' => 8,
+				'headers' => [ 'Content-Type' => 'application/json' ],
+				'body'    => wp_json_encode([ 'event' => 'rwsb.build', 'url' => $url, 'site' => home_url() ]),
+			] );
+			return;
+		}
+		// Debounced: schedule a single webhook send within the window.
+		if ( ! wp_next_scheduled( 'rwsb_send_webhook' ) ) {
+			wp_schedule_single_event( time() + max( 1, $debounce ), 'rwsb_send_webhook', [] );
+		}
+	}
+
+	public static function send_debounced_webhook(): void {
+		$settings = rwsb_get_settings();
+		$hook = trim( (string) $settings['webhook_url'] );
 		if ( $hook === '' ) return;
 		wp_remote_post( $hook, [
 			'timeout' => 8,
 			'headers' => [ 'Content-Type' => 'application/json' ],
-			'body'    => wp_json_encode([ 'event' => 'rwsb.build', 'url' => $url, 'site' => home_url() ]),
+			'body'    => wp_json_encode([ 'event' => 'rwsb.deploy', 'site' => home_url() ]),
 		] );
 	}
 }

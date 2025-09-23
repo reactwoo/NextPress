@@ -10,7 +10,10 @@ function rwsb_get_settings(): array {
 		'serve_static'   => 1,
 		'respect_logged' => 1,
 		'bypass_param'   => 'rwsb',
+		'provider'       => 'cloudflare',
 		'webhook_url'    => '',
+		'webhook_mode'   => 'debounced',
+		'deploy_debounce_sec' => 60,
 		'headers'        => [
 			'Cache-Control' => 'public, max-age=31536000, stale-while-revalidate=30',
 			'X-Powered-By'  => 'ReactWoo Static Builder'
